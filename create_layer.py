@@ -1,3 +1,5 @@
+# pip install mitreattack-python loguru stix2 tqdm
+
 from mitreattack.navlayers import UsageLayerGenerator
 import mitreattack.attackToExcel.attackToExcel as attackToExcel
 import mitreattack.attackToExcel.stixToDf as stixToDf
@@ -21,7 +23,6 @@ procedure_df = techniques_data['procedure examples']
 # Get all Procedure Examples
 
 def cite_link(citations):
-    #print(citations)
     links = []
     for citation in citations:
         links.append((citation[11:-1], citations_df[citations_df['reference'].str.contains(citation[11:-1])].iloc[0]['url']))
@@ -49,9 +50,33 @@ layer_dict = {
         "layer" : "4.3",
         "navigator": "4.7.1"
     },
-    "description": "",
     "domain": "enterprise-attack",
-    "techniques": list()
+    "techniques": list(),
+    "sorting": 3,
+    "layout": {
+		"layout": "flat",
+		"aggregateFunction": "sum",
+		"showID": False,
+		"showName": True,
+		"showAggregateScores": True,
+		"countUnscored": False
+	},
+    "gradient": {
+		"colors": [
+			"#8ec843ff",
+			"#ffe766ff",
+			"#ff6666ff"
+		],
+		"minValue": 1,
+		"maxValue": 100
+	},
+	"legendItems": [],
+	"metadata": [],
+	"links": [],
+	"showTacticRowBackground": False,
+	"tacticRowBackground": "#dddddd",
+	"selectTechniquesAcrossTactics": True,
+	"selectSubtechniquesWithParent": False
 }
 
 techniques_dict = {}
@@ -107,5 +132,14 @@ def df_to_layer(row, techniques_dict, techniques_df):
 
 df.apply(df_to_layer, axis=1, techniques_dict=techniques_dict, techniques_df=techniques_df)
 layer_dict['techniques'] = list(techniques_dict.values())
+
+maxValue = 1
+for technique in layer_dict['techniques']:
+    if technique['score'] > maxValue:
+        maxValue = technique['score']
+
+# set layer background color based on high and low scores
+layer_dict['gradient']['maxValue'] = maxValue
+
 output_layer = Layer(layer_dict)
 output_layer.to_file('layer.json')
