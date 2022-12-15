@@ -6,7 +6,7 @@ from mitreattack.navlayers.core.objlink import LinkDiv
 import pandas as pd
 
 # add in desired Group or Software IDs here
-ids = ['G0007', 'G0016']
+ids = ['G0027', 'G0007', 'G0016']
 
 # Get all STIX
 
@@ -31,7 +31,7 @@ procedure_dfs = []
 for id in ids:
     procedure_dfs.append(procedure_df[procedure_df['source ID'] == id][['source ID', 'target ID', 'mapping description']].copy())
 df = pd.concat(procedure_dfs)
-df['citation'] = df['mapping description'].str.extractall(r'[^(]*(?P<citation>\(Citation: [a-zA-Z0-9 ]+\))').groupby(level=0).agg(lambda x: list(x))['citation']
+df['citation'] = df['mapping description'].str.extractall(r'[^(]*(?P<citation>\(Citation: [^)]+\))').groupby(level=0).agg(lambda x: list(x))['citation']
 df['description'] = df['mapping description'].str.replace(r'\([^\)]*?\)|\[|\]', '', regex=True)
 df = df[['source ID', 'target ID', 'description', 'citation']]
 
@@ -45,7 +45,7 @@ df = df[['source ID', 'target ID', 'description', 'links']]
 layer_dict = {
     "name": "layer example",
     "versions" : {
-        "attack": "12",
+        "attack": "11",
         "layer" : "4.3",
         "navigator": "4.7.1"
     },
@@ -63,21 +63,13 @@ def df_to_layer(row, techniques_dict, techniques_df):
         technique['techniqueID'] = row['target ID']
         all_tactics = techniques_df[techniques_df['ID']==row['target ID']].iloc[0]['tactics']
         technique['tactic'] = techniques_dict[row['target ID']]['tactic']
-        '''
-        if 'tactic' not in technique:
-            print('####################################')
-            print('NO TACTIC ASSIGNED')
-            print(all_tactics)
-        '''
         technique['metadata'] = techniques_dict[row['target ID']]['metadata']
         technique['metadata'].append(
             {'name': row['source ID'], 'value': row['description']}
         )
         technique['links'] = techniques_dict[row['target ID']]['links']
 
-        # need to manually replace with regex
-        technique['links'].append(LinkDiv(active=True))
-        #technique['links'].append({'divider': True})
+        technique['links'].append({'divider': True})
 
         technique['score'] = techniques_dict[row['target ID']]['score'] + 1
 
@@ -117,11 +109,3 @@ df.apply(df_to_layer, axis=1, techniques_dict=techniques_dict, techniques_df=tec
 layer_dict['techniques'] = list(techniques_dict.values())
 output_layer = Layer(layer_dict)
 output_layer.to_file('layer.json')
-
-# Fix Divider Formatting
-
-with open('layer.json', 'r', encoding='utf16') as layer:
-    text = layer.read()
-fixed_text = text.replace('"name": "DIVIDER", "value": true', '"divider": true')
-with open('layer.json', 'w') as layer:
-    layer.write(fixed_text)
