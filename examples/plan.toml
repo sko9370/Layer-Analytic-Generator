@@ -1,0 +1,37 @@
+# Example LAG config. See the README's "Configuration reference" section for details on every
+# option. Run `lag build -c examples/plan.toml` from the repo root to try it.
+
+name = "ZIRCONIUM / ShadowPad Analytic Plan"
+domain = "enterprise-attack"
+output_dir = "output"
+
+[sources]
+# ATT&CK Group (G####), Software (S####), or Campaign (C####) ID = positive integer weight
+G0128 = 2
+S0596 = 1
+
+# Merge in a custom Navigator layer for threat activity that doesn't have a matching Group,
+# Software, or Campaign ID. Uncomment and point "path" at a layer JSON file (relative to this
+# config file's directory).
+# [[custom_layers]]
+# path = "custom.json"
+# label = "Observed Activity"
+
+[attack]
+version = ""             # "" = latest release; pin a specific one like "19.2" for reproducibility
+stix_file = ""             # "" = download; set to a local path to skip the network entirely
+cache_dir = ".lag_cache"
+offline = false
+
+[analytics]
+car = true
+car_coverage_url = "https://raw.githubusercontent.com/mitre-attack/car/master/docs/coverage/splunk_analytic_coverage_01_08_2024.json"
+jpcert = true
+jpcert_tool_list_url = "https://raw.githubusercontent.com/JPCERTCC/ToolAnalysisResultSheet/master/tool-list.html"
+network_data_components = ["Network Connection Creation", "Network Traffic Content", "Network Traffic Flow"]
+
+[layer]
+gradient = ["#8ec843ff", "#ffe766ff", "#ff6666ff"]
+
+[html]
+enabled = true
