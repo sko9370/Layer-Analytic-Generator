@@ -1,0 +1,206 @@
+"""Tests for lag.config: TOML loading, validation, path resolution, EXAMPLE_CONFIG."""
+
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from lag.config import EXAMPLE_CONFIG, config_from_dict, load_config
+from lag.errors import LagError
+from lag.models import Config
+
+MINIMAL = {"sources": {"G0128": 1}}
+
+
+def test_minimal_config_ok(tmp_path: Path) -> None:
+    config = config_from_dict(MINIMAL, tmp_path)
+    assert config.sources == {"G0128": 1}
+    assert config.name == "Analytic Plan"
+
+
+def test_unknown_top_level_key_raises(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "domian": "typo"}
+    with pytest.raises(LagError, match="unknown key"):
+        config_from_dict(data, tmp_path)
+
+
+def test_unknown_nested_key_raises(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "site": {"enalbed": True}}
+    with pytest.raises(LagError, match="unknown key"):
+        config_from_dict(data, tmp_path)
+
+
+@pytest.mark.parametrize("bad_id", ["X0128", "G012", "g012x", "G01288"])
+def test_bad_source_id_raises(tmp_path: Path, bad_id: str) -> None:
+    with pytest.raises(LagError, match="invalid source ID"):
+        config_from_dict({"sources": {bad_id: 1}}, tmp_path)
+
+
+def test_source_id_normalized_to_upper(tmp_path: Path) -> None:
+    config = config_from_dict({"sources": {"g0128": 2}}, tmp_path)
+    assert config.sources == {"G0128": 2}
+
+
+def test_float_weight_raises(tmp_path: Path) -> None:
+    with pytest.raises(LagError, match="positive integer"):
+        config_from_dict({"sources": {"G0128": 1.5}}, tmp_path)
+
+
+def test_bool_weight_raises(tmp_path: Path) -> None:
+    with pytest.raises(LagError, match="positive integer"):
+        config_from_dict({"sources": {"G0128": True}}, tmp_path)
+
+
+def test_zero_or_negative_weight_raises(tmp_path: Path) -> None:
+    with pytest.raises(LagError, match="positive integer"):
+        config_from_dict({"sources": {"G0128": 0}}, tmp_path)
+    with pytest.raises(LagError, match="positive integer"):
+        config_from_dict({"sources": {"G0128": -1}}, tmp_path)
+
+
+def test_site_table_is_unknown_key(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "site": {"mode": "local"}}
+    with pytest.raises(LagError, match="unknown key"):
+        config_from_dict(data, tmp_path)
+
+
+def test_html_enabled_default_true(tmp_path: Path) -> None:
+    config = config_from_dict(MINIMAL, tmp_path)
+    assert config.html_enabled is True
+
+
+def test_html_enabled_can_be_disabled(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "html": {"enabled": False}}
+    config = config_from_dict(data, tmp_path)
+    assert config.html_enabled is False
+
+
+def test_html_unknown_key_raises(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "html": {"enabeld": True}}
+    with pytest.raises(LagError, match="unknown key"):
+        config_from_dict(data, tmp_path)
+
+
+def test_html_enabled_must_be_boolean(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "html": {"enabled": "yes"}}
+    with pytest.raises(LagError, match="html.enabled"):
+        config_from_dict(data, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "gradient",
+    [
+        ["#8ec843ff"],  # only one color
+        ["notacolor", "#ffe766ff"],
+        ["#8ec843", "#ggg766"],
+        "#8ec843ff",  # not a list at all
+    ],
+)
+def test_bad_gradient_raises(tmp_path: Path, gradient: object) -> None:
+    data = {"sources": {"G0128": 1}, "layer": {"gradient": gradient}}
+    with pytest.raises(LagError, match="gradient"):
+        config_from_dict(data, tmp_path)
+
+
+def test_gradient_accepts_6_and_8_digit_hex(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "layer": {"gradient": ["#8ec843", "#ffe766ff"]}}
+    config = config_from_dict(data, tmp_path)
+    assert config.layer_gradient == ["#8ec843", "#ffe766ff"]
+
+
+def test_no_sources_and_no_custom_layers_raises(tmp_path: Path) -> None:
+    with pytest.raises(LagError, match="at least one source or custom layer"):
+        config_from_dict({}, tmp_path)
+
+
+def test_custom_layer_alone_is_enough(tmp_path: Path) -> None:
+    data = {"custom_layers": [{"path": "custom.json"}]}
+    config = config_from_dict(data, tmp_path)
+    assert config.sources == {}
+    assert len(config.custom_layers) == 1
+    assert config.custom_layers[0].label == "Observed Activity"
+
+
+def test_custom_layer_unknown_key_raises(tmp_path: Path) -> None:
+    data = {"custom_layers": [{"path": "custom.json", "lable": "typo"}]}
+    with pytest.raises(LagError, match="unknown key"):
+        config_from_dict(data, tmp_path)
+
+
+def test_custom_layer_missing_path_raises(tmp_path: Path) -> None:
+    data = {"custom_layers": [{"label": "Observed"}]}
+    with pytest.raises(LagError, match="path"):
+        config_from_dict(data, tmp_path)
+
+
+def test_relative_paths_resolved_against_base_dir(tmp_path: Path) -> None:
+    base_dir = tmp_path / "configs"
+    base_dir.mkdir()
+    data = {
+        "sources": {"G0128": 1},
+        "output_dir": "out",
+        "attack": {"stix_file": "bundle.json", "cache_dir": "cache"},
+        "custom_layers": [{"path": "custom.json"}],
+    }
+    config = config_from_dict(data, base_dir)
+    assert config.output_dir == base_dir / "out"
+    assert config.stix_file == base_dir / "bundle.json"
+    assert config.cache_dir == base_dir / "cache"
+    assert config.custom_layers[0].path == base_dir / "custom.json"
+
+
+def test_absolute_paths_kept_as_is(tmp_path: Path) -> None:
+    absolute = tmp_path / "elsewhere" / "out"
+    data = {"sources": {"G0128": 1}, "output_dir": str(absolute)}
+    config = config_from_dict(data, tmp_path / "configs")
+    assert config.output_dir == absolute
+
+
+def test_empty_stix_file_means_none(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "attack": {"stix_file": ""}}
+    config = config_from_dict(data, tmp_path)
+    assert config.stix_file is None
+
+
+def test_defaults_still_resolved_relative_to_base_dir(tmp_path: Path) -> None:
+    base_dir = tmp_path / "configs"
+    config = config_from_dict({"sources": {"G0128": 1}}, base_dir)
+    assert config.output_dir == base_dir / "output"
+    assert config.cache_dir == base_dir / ".lag_cache"
+
+
+def test_load_config_reads_toml_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "plan.toml"
+    config_path.write_text("[sources]\nG0128 = 2\n", encoding="utf-8")
+    config = load_config(config_path)
+    assert config.sources == {"G0128": 2}
+    assert config.output_dir == tmp_path / "output"
+
+
+def test_load_config_missing_file_raises() -> None:
+    with pytest.raises(LagError, match="not found"):
+        load_config(Path("/nonexistent/plan.toml"))
+
+
+def test_load_config_invalid_toml_raises(tmp_path: Path) -> None:
+    config_path = tmp_path / "plan.toml"
+    config_path.write_text("this is not [valid toml", encoding="utf-8")
+    with pytest.raises(LagError):
+        load_config(config_path)
+
+
+def test_example_config_round_trips(tmp_path: Path) -> None:
+    data = tomllib.loads(EXAMPLE_CONFIG)
+    config = config_from_dict(data, tmp_path)
+    assert isinstance(config, Config)
+    assert config.sources == {"G0128": 2, "S0596": 1}
+    assert config.layer_gradient == ["#8ec843ff", "#ffe766ff", "#ff6666ff"]
+    assert config.html_enabled is True
+    assert len(config.custom_layers) == 1
+    assert config.custom_layers[0].path == tmp_path / "custom.json"
+
+
+def test_example_config_has_no_em_dash() -> None:
+    assert "—" not in EXAMPLE_CONFIG
