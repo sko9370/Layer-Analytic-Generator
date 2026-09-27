@@ -7,10 +7,12 @@ import tomllib
 from pathlib import Path
 
 from lag.errors import LagError
-from lag.models import Config, CustomLayer
+from lag.models import CONFIDENCE_LEVELS, Config, CustomLayer, ReportSource
 
 SOURCE_ID_RE = re.compile(r"^[GSC]\d{4}$")
 GRADIENT_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+LLM_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 _TOP_LEVEL_KEYS = {
     "name",
@@ -18,10 +20,12 @@ _TOP_LEVEL_KEYS = {
     "output_dir",
     "sources",
     "custom_layers",
+    "reports",
     "attack",
     "analytics",
     "layer",
     "html",
+    "llm",
 }
 _ATTACK_KEYS = {"version", "stix_file", "cache_dir", "offline"}
 _ANALYTICS_KEYS = {
@@ -34,6 +38,8 @@ _ANALYTICS_KEYS = {
 _LAYER_KEYS = {"gradient"}
 _HTML_KEYS = {"enabled"}
 _CUSTOM_LAYER_KEYS = {"path", "label"}
+_REPORT_KEYS = {"source", "label", "weight", "min_confidence"}
+_LLM_KEYS = {"model", "effort"}
 
 _DEFAULTS = Config()
 
@@ -49,6 +55,18 @@ S0596 = 1
 [[custom_layers]]    # optional, repeatable
 path = "custom.json"
 label = "Observed Activity"
+
+# [[reports]]          # optional, repeatable: a threat report read by an LLM (Claude) for its techniques
+# source = "https://example.com/report.pdf"   # URL, or a local .pdf/.html/.htm/.txt/.md path
+# label = ""           # "" = "Report: <title>"
+# weight = 1
+# min_confidence = "medium"    # low, medium, high
+
+[llm]                 # only used when [[reports]] entries are present
+model = "claude-opus-5"
+effort = "high"       # low, medium, high, xhigh, max
+# needs an API key: set ANTHROPIC_API_KEY, or run `ant auth login` once.
+# results are cached under attack.cache_dir, so rebuilds do not re-bill the API.
 
 [attack]
 version = ""         # "" = latest
@@ -125,6 +143,42 @@ def _parse_custom_layers(raw: object, base_dir: Path) -> list[CustomLayer]:
     return layers
 
 
+def _parse_reports(raw: object, base_dir: Path) -> list[ReportSource]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise LagError("reports must be a list of tables")
+    reports: list[ReportSource] = []
+    for i, table in enumerate(raw):
+        if not isinstance(table, dict):
+            raise LagError(f"reports[{i}] must be a table")
+        _check_keys(table, _REPORT_KEYS, f"reports[{i}]")
+
+        source = table.get("source", "")
+        if not isinstance(source, str) or not source:
+            raise LagError(f"reports[{i}] is missing source")
+        if not URL_RE.match(source):
+            source = str(_resolve_path(source, base_dir))
+
+        label = table.get("label", ReportSource.label)
+        if not isinstance(label, str):
+            raise LagError(f"reports[{i}].label must be a string")
+
+        weight = table.get("weight", ReportSource.weight)
+        if isinstance(weight, bool) or not isinstance(weight, int) or weight <= 0:
+            raise LagError(f"reports[{i}].weight must be a positive integer, got {weight!r}")
+
+        min_confidence = table.get("min_confidence", ReportSource.min_confidence)
+        if min_confidence not in CONFIDENCE_LEVELS:
+            raise LagError(
+                f"reports[{i}].min_confidence must be one of {', '.join(CONFIDENCE_LEVELS)}, "
+                f"got {min_confidence!r}"
+            )
+
+        reports.append(ReportSource(source=source, label=label, weight=weight, min_confidence=min_confidence))
+    return reports
+
+
 def config_from_dict(data: dict, base_dir: Path) -> Config:
     """Validate and build a Config from a parsed TOML dict. Relative paths resolve against base_dir."""
     _check_keys(data, _TOP_LEVEL_KEYS, "config")
@@ -135,8 +189,9 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
 
     sources = _parse_sources(data.get("sources"))
     custom_layers = _parse_custom_layers(data.get("custom_layers"), base_dir)
-    if not sources and not custom_layers:
-        raise LagError("config must define at least one source or custom layer")
+    reports = _parse_reports(data.get("reports"), base_dir)
+    if not sources and not custom_layers and not reports:
+        raise LagError("config must define at least one source, custom layer, or report")
 
     attack_table = data.get("attack", {})
     if not isinstance(attack_table, dict):
@@ -178,12 +233,26 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
     if not isinstance(html_enabled, bool):
         raise LagError("html.enabled must be a boolean")
 
+    llm_table = data.get("llm", {})
+    if not isinstance(llm_table, dict):
+        raise LagError("llm must be a table")
+    _check_keys(llm_table, _LLM_KEYS, "llm")
+    llm_model = llm_table.get("model", _DEFAULTS.llm_model)
+    if not isinstance(llm_model, str) or not llm_model:
+        raise LagError("llm.model must be a non-empty string")
+    llm_effort = llm_table.get("effort", _DEFAULTS.llm_effort)
+    if llm_effort not in LLM_EFFORT_LEVELS:
+        raise LagError(f"llm.effort must be one of {', '.join(LLM_EFFORT_LEVELS)}, got {llm_effort!r}")
+
     return Config(
         name=name,
         domain=domain,
         output_dir=output_dir,
         sources=sources,
         custom_layers=custom_layers,
+        reports=reports,
+        llm_model=llm_model,
+        llm_effort=llm_effort,
         attack_version=attack_version,
         stix_file=stix_file,
         cache_dir=cache_dir,
