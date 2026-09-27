@@ -9,10 +9,22 @@ Navigator layer plus CSV plan plus HTML plan out) carry over directly.
 Breaking changes and major changes vs. the July 2024 notebook:
 
 - LAG is now an installable Python package (`pip install "git+https://github.com/sko9370/Layer-Analytic-Generator"`)
-  with a `lag` command line tool (`lag init`, `lag build`), instead of a single Colab notebook you
-  had to run cell by cell. The notebook still exists (`lag.ipynb`) but is now a thin wrapper around
-  the package.
+  with a `lag` command line tool (`lag init`, `lag build`, `lag extract`), instead of a single
+  Colab notebook you had to run cell by cell. The notebook (`lag.ipynb`) is removed entirely; LAG
+  is used only through the CLI or the Python API (`from lag.config import load_config; from
+  lag.pipeline import run`).
 - Requires Python 3.11+.
+- Every pipeline step (load ATT&CK data, read custom layers, extract report techniques, score,
+  write the layer, load analytic sources, build the plan, write the HTML plan) now reports its own
+  `[n/N] step...` progress line and, on failure, raises an error naming the step, the underlying
+  cause, and a hint for fixing it, instead of an unlabeled traceback or a bare message.
+- Adds LLM-based technique extraction from threat reports (`lag extract <url-or-pdf>`, `[[reports]]`
+  in the config, `lag build --report ...`): an Anthropic Claude model reads a report (URL or local
+  PDF/HTML/text file) and returns ATT&CK techniques with evidence, a supporting quote, and a
+  confidence level, which feed into scoring and the plan like any other source. Results are cached
+  by content hash so rebuilds do not re-bill the API. This replaces the old Future Works "TRAM"
+  placeholder with a shipped feature. Requires the `layer-analytic-generator[llm]` extra and an
+  `ANTHROPIC_API_KEY` (or `ant auth login`).
 - Dropped the `mitreattack-python`, `stix2`, `pandas`, and `natsort` dependencies. ATT&CK STIX
   bundles are now parsed directly; there is no periodic "update mitreattack-python and check for
   breaking changes" chore anymore.
