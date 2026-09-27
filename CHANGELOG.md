@@ -4,7 +4,7 @@
 
 A ground-up rewrite. This is a breaking change from the 2024 Colab notebook in almost every
 respect; there is no automatic migration path, but the concepts (weighted Group/Software IDs in,
-Navigator layer plus CSV plan plus static site out) carry over directly.
+Navigator layer plus CSV plan plus HTML plan out) carry over directly.
 
 Breaking changes and major changes vs. the July 2024 notebook:
 
@@ -24,8 +24,12 @@ Breaking changes and major changes vs. the July 2024 notebook:
   `tactics_priority` list.
 - Adds support for ATT&CK's native detection strategies and analytics
   (`x-mitre-detection-strategy` / `x-mitre-analytic` / `x-mitre-data-component`), which are now
-  shown in the plan and the site alongside MITRE CAR and JPCERT/CC Tool Analysis Result Sheet
-  matches.
+  shown in the plan alongside MITRE CAR and JPCERT/CC Tool Analysis Result Sheet matches.
+- The MkDocs static site (a project directory built and zipped on every run) has been replaced by
+  `analytic_plan.html`, a single self-contained file with inline CSS/JS, search, and filters by
+  tactic, category, and source, that opens by double-click and needs no build step, no separate
+  site directory, and no web server. The `[site]` config table (`enabled`/`mode`/`zip`) is replaced
+  by `[html]` (`enabled`); `mkdocs` is no longer a dependency.
 - The host vs. network split in the plan is now based on the ATT&CK data components attached to a
   technique's analytics (configurable via `network_data_components`), instead of the old free-text
   "data sources" substring check.

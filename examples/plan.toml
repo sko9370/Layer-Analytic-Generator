@@ -33,7 +33,5 @@ network_data_components = ["Network Connection Creation", "Network Traffic Conte
 [layer]
 gradient = ["#8ec843ff", "#ffe766ff", "#ff6666ff"]
 
-[site]
+[html]
 enabled = true
-mode = "local"
-zip = true
