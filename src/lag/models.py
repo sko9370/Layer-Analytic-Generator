@@ -125,7 +125,8 @@ class CustomLayer:
 
 
 CONFIDENCE_LEVELS = ("low", "medium", "high")
-DEFAULT_LLM_MODEL = "claude-opus-5"
+LLM_PROVIDERS = ("anthropic", "openai")
+DEFAULT_LLM_MODEL = "claude-opus-5"  # default for provider "anthropic"; "openai" has no default model
 
 
 @dataclass
@@ -147,9 +148,15 @@ class Config:
     sources: dict[str, int] = field(default_factory=dict)
     custom_layers: list[CustomLayer] = field(default_factory=list)
     reports: list[ReportSource] = field(default_factory=list)
-    # LLM report extraction (Anthropic API; key from ANTHROPIC_API_KEY or an `ant auth login` profile)
-    llm_model: str = DEFAULT_LLM_MODEL
-    llm_effort: str = "high"  # "low", "medium", "high", "xhigh", or "max"
+    # LLM report extraction
+    # "anthropic" (Claude API) or "openai" (OpenAI or any OpenAI-compatible API)
+    llm_provider: str = "anthropic"
+    llm_model: str = ""  # "" = provider default (DEFAULT_LLM_MODEL for anthropic; required for openai)
+    llm_effort: str = ""  # "" = provider default; anthropic: low..max, openai: reasoning_effort value
+    llm_base_url: str = ""  # openai only: OpenAI-compatible endpoint (Azure, Ollama, vLLM, LM Studio, ...)
+    # env var holding the API key; "" = SDK default (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+    llm_api_key_env: str = ""
+    llm_pdf_input: str = "auto"  # "native" (send the PDF), "text" (extract text locally), "auto"
     # ATT&CK data
     attack_version: str = ""  # "" means latest
     stix_file: Path | None = None  # local STIX bundle; skips download

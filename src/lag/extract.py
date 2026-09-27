@@ -1,15 +1,20 @@
-"""LLM (Anthropic Claude) extraction of ATT&CK techniques from a threat report.
+"""LLM extraction of ATT&CK techniques from a threat report.
 
-The `anthropic` package is only needed for this feature, so it is imported lazily
-inside the functions that need it (see pyproject.toml's "llm" extra).
+Two providers are supported: Anthropic (Claude) and OpenAI or any OpenAI-compatible API (Azure
+OpenAI, Ollama, vLLM, LM Studio, ...). Both SDKs are optional and only needed for this feature,
+so they are imported lazily inside the functions that need them (see pyproject.toml's "anthropic",
+"openai", and "llm" extras). pypdf is likewise imported lazily, only when a PDF report is sent as
+extracted text instead of natively.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +26,8 @@ from bs4 import BeautifulSoup
 from lag.errors import LagError
 from lag.models import (
     CONFIDENCE_LEVELS,
+    DEFAULT_LLM_MODEL,
+    LLM_PROVIDERS,
     AttackData,
     Citation,
     Config,
@@ -42,6 +49,13 @@ _USER_AGENT = (
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 TECHNIQUE_ID_RE = r"^T\d{4}(\.\d{3})?$"
+
+# The exact message config.py raises when [[reports]] are configured with provider "openai" and no
+# model: keep this string identical in both places (config.py does not import this module).
+OPENAI_MODEL_REQUIRED_MSG = (
+    'llm.model is required for provider "openai" (the model name your OpenAI account or endpoint '
+    "serves, for example the one you would pass to the OpenAI API)"
+)
 
 SCHEMA = {
     "type": "object",
@@ -197,6 +211,73 @@ def load_document(source: str, *, timeout: float = 60) -> Document:
 
 
 # ---------------------------------------------------------------------------
+# LLM settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LlmSettings:
+    """Resolved (provider-defaulted) LLM settings for one extraction run."""
+
+    provider: str
+    model: str
+    effort: str | None  # None means: omit the reasoning/effort parameter entirely
+    base_url: str
+    api_key_env: str
+    pdf_input: str  # resolved to "native" or "text", never "auto"
+
+
+def resolve_llm_settings(config: Config) -> LlmSettings:
+    """Apply provider defaults to config.llm_* fields. Raises LagError for provider "openai"
+    with no model set (there is no default OpenAI model)."""
+    provider = config.llm_provider
+    if provider not in LLM_PROVIDERS:
+        raise LagError(f"unknown llm provider: {provider!r} (expected one of {', '.join(LLM_PROVIDERS)})")
+
+    model = config.llm_model
+    effort: str | None = config.llm_effort
+    if provider == "anthropic":
+        model = model or DEFAULT_LLM_MODEL
+        effort = effort or "high"
+    else:  # openai
+        if not model:
+            raise LagError(OPENAI_MODEL_REQUIRED_MSG)
+        effort = effort or None
+
+    pdf_input = config.llm_pdf_input
+    if pdf_input == "auto":
+        pdf_input = "text" if provider == "openai" and config.llm_base_url else "native"
+
+    return LlmSettings(
+        provider=provider,
+        model=model,
+        effort=effort,
+        base_url=config.llm_base_url,
+        api_key_env=config.llm_api_key_env,
+        pdf_input=pdf_input,
+    )
+
+
+def llm_credentials_hint(settings: LlmSettings) -> str:
+    """Hint text for a failed report-extraction step: names the right key variable and package,
+    and for openai with a base_url, mentions it too."""
+    if settings.provider == "openai":
+        key_var = settings.api_key_env or "OPENAI_API_KEY"
+        hint = (
+            f"check {key_var} (or llm.api_key_env), the report URL/path, and that the openai package "
+            'is installed (pip install "layer-analytic-generator[openai]")'
+        )
+        if settings.base_url:
+            hint += f"; check that llm.base_url ({settings.base_url}) is reachable"
+        return hint
+    key_var = settings.api_key_env or "ANTHROPIC_API_KEY"
+    return (
+        f"check {key_var} (or run `ant auth login`), the report URL/path, and that the anthropic "
+        'package is installed (pip install "layer-analytic-generator[llm]")'
+    )
+
+
+# ---------------------------------------------------------------------------
 # LLM extraction
 # ---------------------------------------------------------------------------
 
@@ -223,8 +304,18 @@ def default_label(document: Document) -> str:
     return f"Report: {document.title[:60]}"
 
 
-def _cache_path(document: Document, model: str, effort: str, cache_dir: Path) -> Path:
-    key = hashlib.sha256((document.sha256 + model + effort + PROMPT_VERSION).encode("utf-8")).hexdigest()[:32]
+def _cache_path(document: Document, settings: LlmSettings, cache_dir: Path) -> Path:
+    key_bits = "|".join(
+        [
+            settings.provider,
+            settings.model,
+            settings.effort or "",
+            settings.base_url,
+            settings.pdf_input,
+            PROMPT_VERSION,
+        ]
+    )
+    key = hashlib.sha256((document.sha256 + key_bits).encode("utf-8")).hexdigest()[:32]
     return Path(cache_dir) / "extractions" / f"{key}.json"
 
 
@@ -286,26 +377,30 @@ def _write_cache(path: Path, extraction: Extraction) -> None:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
-def _document_block(document: Document) -> dict:
+def _extract_pdf_text(document: Document) -> str:
+    """Extract text from a PDF document locally with pypdf, for providers/endpoints that cannot
+    take a native PDF input."""
+    try:
+        import pypdf
+    except ImportError as exc:
+        raise LagError(
+            'PDF text extraction needs the pypdf package: pip install "layer-analytic-generator[openai]"'
+        ) from exc
+
+    reader = pypdf.PdfReader(io.BytesIO(document.data))
+    text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    if len(text) < MIN_TEXT_CHARS:
+        raise LagError(
+            f"report {document.source} looks scanned; OCR it first or use a provider with native PDF input"
+        )
+    return text
+
+
+def _document_text(document: Document) -> str:
+    """The document's text: decoded as-is for a text/plain document, extracted with pypdf for a PDF."""
     if document.media_type == "application/pdf":
-        return {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": "application/pdf",
-                "data": base64.b64encode(document.data).decode("ascii"),
-            },
-            "title": document.title,
-        }
-    return {
-        "type": "document",
-        "source": {
-            "type": "text",
-            "media_type": "text/plain",
-            "data": document.data.decode("utf-8"),
-        },
-        "title": document.title,
-    }
+        return _extract_pdf_text(document)
+    return document.data.decode("utf-8")
 
 
 def _instructions(attack: AttackData) -> str:
@@ -319,24 +414,19 @@ def _confidence_rank(confidence: str) -> int:
     return CONFIDENCE_LEVELS.index(confidence) if confidence in CONFIDENCE_LEVELS else -1
 
 
-def _parse_response(message, document: Document, model: str, attack: AttackData) -> Extraction:
-    if message.stop_reason == "refusal":
-        category = message.stop_details.category if message.stop_details else None
-        detail = f" ({category})" if category else ""
-        raise LagError(f"Claude refused to extract techniques from {document.source}{detail}")
-    if message.stop_reason == "max_tokens":
-        raise LagError(
-            f"Claude hit the max_tokens limit extracting techniques from {document.source}; "
-            "try a shorter document"
-        )
-
-    text_block = next((b for b in message.content if getattr(b, "type", None) == "text"), None)
-    if text_block is None:
-        raise LagError(f"Claude returned no text content for report {document.source}")
+def _parse_response_text(text: str, document: Document, model: str, attack: AttackData) -> Extraction:
+    """Shared parsing for both providers: JSON load, uppercase IDs, unknown IDs to dropped,
+    dedupe keeping the highest-confidence entry per technique."""
+    # Some OpenAI-compatible servers wrap JSON in a markdown code fence despite the schema.
+    fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, flags=re.S)
+    if fenced:
+        text = fenced.group(1)
     try:
-        payload = json.loads(text_block.text)
+        payload = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise LagError(f"Claude's response for {document.source} was not valid JSON: {exc}") from exc
+        raise LagError(f"the model's response for {document.source} was not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise LagError(f"the model's response for {document.source} was not a JSON object")
 
     report_title = payload.get("report_title") or document.title
     order: list[str] = []
@@ -376,28 +466,41 @@ def _auth_hint(exc: Exception) -> str:
     return f"{exc} (set ANTHROPIC_API_KEY or run `ant auth login`)"
 
 
-def extract_techniques(
-    document: Document,
-    attack: AttackData,
-    *,
-    model: str,
-    effort: str = "high",
-    cache_dir: Path,
-    offline: bool = False,
-    client=None,
-) -> Extraction:
-    """Extract ATT&CK techniques from document with Claude, cached by content, model and effort."""
-    cache_path = _cache_path(document, model, effort, cache_dir)
-    if cache_path.is_file():
-        logger.info("using cached extraction")
-        with cache_path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        cached = _extraction_from_payload(payload, document.source, document.title, model)
-        return _drop_unknown(cached, attack)
+def _resolve_api_key(api_key_env: str) -> str | None:
+    """The API key from api_key_env if set (LagError if that variable is empty/unset), else None
+    (meaning: let the SDK fall back to its own default environment variable)."""
+    if not api_key_env:
+        return None
+    value = os.environ.get(api_key_env)
+    if not value:
+        raise LagError(f"environment variable {api_key_env!r} (llm.api_key_env) is not set or empty")
+    return value
 
-    if offline:
-        raise LagError(f"no cached extraction for {document.source} and offline mode is enabled")
 
+def _anthropic_document_block(document: Document, pdf_input: str) -> dict:
+    if document.media_type == "application/pdf" and pdf_input == "native":
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": base64.b64encode(document.data).decode("ascii"),
+            },
+            "title": document.title,
+        }
+    return {
+        "type": "document",
+        "source": {
+            "type": "text",
+            "media_type": "text/plain",
+            "data": _document_text(document),
+        },
+        "title": document.title,
+    }
+
+
+def _request_anthropic(document: Document, attack: AttackData, settings: LlmSettings, client=None) -> str:
+    """Call the Anthropic API and return the raw JSON text of its response."""
     try:
         import anthropic
     except ImportError as exc:
@@ -405,23 +508,28 @@ def extract_techniques(
             'LLM extraction needs the anthropic package: pip install "layer-analytic-generator[llm]"'
         ) from exc
 
+    api_key = _resolve_api_key(settings.api_key_env)
+
     try:
-        active_client = client or anthropic.Anthropic()
+        active_client = client or (anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic())
     except Exception as exc:
         raise LagError(f"could not create the Anthropic client: {_auth_hint(exc)}") from exc
 
     try:
         with active_client.beta.messages.stream(
-            model=model,
+            model=settings.model,
             max_tokens=64000,
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}},
+            output_config={"effort": settings.effort, "format": {"type": "json_schema", "schema": SCHEMA}},
             system=SYSTEM_PROMPT,
             messages=[
                 {
                     "role": "user",
-                    "content": [_document_block(document), {"type": "text", "text": _instructions(attack)}],
+                    "content": [
+                        _anthropic_document_block(document, settings.pdf_input),
+                        {"type": "text", "text": _instructions(attack)},
+                    ],
                 }
             ],
         ) as stream:
@@ -429,9 +537,9 @@ def extract_techniques(
     except anthropic.AuthenticationError as exc:
         raise LagError(f"Anthropic authentication failed: {_auth_hint(exc)}") from exc
     except anthropic.PermissionDeniedError as exc:
-        raise LagError(f"Anthropic API access denied for model {model}: {exc}") from exc
+        raise LagError(f"Anthropic API access denied for model {settings.model}: {exc}") from exc
     except anthropic.NotFoundError as exc:
-        raise LagError(f"Anthropic model not found: {model!r} ({exc})") from exc
+        raise LagError(f"Anthropic model not found: {settings.model!r} ({exc})") from exc
     except anthropic.RateLimitError as exc:
         raise LagError(f"Anthropic API rate limit hit: {exc}") from exc
     except anthropic.APIStatusError as exc:
@@ -446,7 +554,148 @@ def extract_techniques(
             "no Anthropic credentials found: set ANTHROPIC_API_KEY or run `ant auth login`"
         ) from exc
 
-    extraction = _parse_response(message, document, model, attack)
+    if message.stop_reason == "refusal":
+        category = message.stop_details.category if message.stop_details else None
+        detail = f" ({category})" if category else ""
+        raise LagError(f"Claude refused to extract techniques from {document.source}{detail}")
+    if message.stop_reason == "max_tokens":
+        raise LagError(
+            f"Claude hit the max_tokens limit extracting techniques from {document.source}; "
+            "try a shorter document"
+        )
+
+    text_block = next((b for b in message.content if getattr(b, "type", None) == "text"), None)
+    if text_block is None:
+        raise LagError(f"Claude returned no text content for report {document.source}")
+    return text_block.text
+
+
+def _openai_document_part(document: Document, pdf_input: str) -> dict:
+    if document.media_type == "application/pdf" and pdf_input == "native":
+        b64 = base64.b64encode(document.data).decode("ascii")
+        filename = document.title or "report.pdf"
+        return {
+            "type": "file",
+            "file": {"filename": filename, "file_data": f"data:application/pdf;base64,{b64}"},
+        }
+    text = _document_text(document)
+    return {"type": "text", "text": f'<document title="{document.title}">\n{text}\n</document>'}
+
+
+def _request_openai(document: Document, attack: AttackData, settings: LlmSettings, client=None) -> str:
+    """Call an OpenAI (or OpenAI-compatible) chat completions API and return the raw JSON text."""
+    try:
+        import openai
+    except ImportError as exc:
+        raise LagError(
+            'LLM extraction needs the openai package: pip install "layer-analytic-generator[openai]"'
+        ) from exc
+
+    api_key = _resolve_api_key(settings.api_key_env)
+    if api_key is None and settings.base_url and not os.environ.get("OPENAI_API_KEY"):
+        # A local/self-hosted OpenAI-compatible server (Ollama, vLLM, LM Studio, ...) needs no key.
+        api_key = "not-needed"
+
+    try:
+        active_client = client or openai.OpenAI(base_url=settings.base_url or None, api_key=api_key)
+    except openai.OpenAIError as exc:
+        raise LagError(
+            f"no OpenAI credentials found: set OPENAI_API_KEY (or llm.api_key_env) ({exc})"
+        ) from exc
+
+    document_part = _openai_document_part(document, settings.pdf_input)
+    kwargs: dict = {
+        "model": settings.model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [document_part, {"type": "text", "text": _instructions(attack)}],
+            },
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "attack_techniques", "schema": SCHEMA, "strict": True},
+        },
+        "max_completion_tokens": 32000,
+    }
+    if settings.effort:
+        kwargs["reasoning_effort"] = settings.effort
+
+    try:
+        response = active_client.chat.completions.create(**kwargs)
+    except openai.AuthenticationError as exc:
+        raise LagError(
+            f"OpenAI authentication failed: set OPENAI_API_KEY (or llm.api_key_env) ({exc})"
+        ) from exc
+    except openai.PermissionDeniedError as exc:
+        raise LagError(f"OpenAI API access denied for model {settings.model!r}: {exc}") from exc
+    except openai.NotFoundError as exc:
+        base_url_hint = f", base_url {settings.base_url!r}" if settings.base_url else ""
+        raise LagError(f"OpenAI model not found: {settings.model!r}{base_url_hint} ({exc})") from exc
+    except openai.RateLimitError as exc:
+        raise LagError(f"OpenAI API rate limit hit: {exc}") from exc
+    except openai.BadRequestError as exc:
+        raise LagError(
+            f"OpenAI API rejected the request: {exc} (the endpoint may not support json_schema "
+            'structured outputs or file inputs; for OpenAI-compatible servers try llm.pdf_input = "text" '
+            "and a model that supports structured outputs)"
+        ) from exc
+    except openai.APIStatusError as exc:
+        raise LagError(f"OpenAI API error (status {exc.status_code}): {exc}") from exc
+    except openai.APIConnectionError as exc:
+        base_url_hint = f" at base_url {settings.base_url!r}" if settings.base_url else ""
+        raise LagError(f"could not reach the OpenAI API{base_url_hint}: {exc}") from exc
+
+    if not response.choices:
+        raise LagError(f"the OpenAI API returned no choices for {document.source}")
+    choice = response.choices[0]
+    if choice.message.refusal:
+        raise LagError(
+            f"the model refused to extract techniques from {document.source}: {choice.message.refusal}"
+        )
+    if choice.finish_reason == "length":
+        raise LagError(
+            f"the model hit the max_completion_tokens limit extracting techniques from "
+            f"{document.source}; try a shorter document or a larger model context"
+        )
+    if choice.finish_reason == "content_filter":
+        raise LagError(f"the model's content filter blocked the response for {document.source}")
+    content = choice.message.content
+    if not content:
+        raise LagError(f"the model returned no content for report {document.source}")
+    return content
+
+
+def extract_techniques(
+    document: Document,
+    attack: AttackData,
+    *,
+    settings: LlmSettings,
+    cache_dir: Path,
+    offline: bool = False,
+    client=None,
+) -> Extraction:
+    """Extract ATT&CK techniques from document with an LLM, cached by content and settings."""
+    cache_path = _cache_path(document, settings, cache_dir)
+    if cache_path.is_file():
+        logger.info("using cached extraction")
+        with cache_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        cached = _extraction_from_payload(payload, document.source, document.title, settings.model)
+        return _drop_unknown(cached, attack)
+
+    if offline:
+        raise LagError(f"no cached extraction for {document.source} and offline mode is enabled")
+
+    if settings.provider == "anthropic":
+        text = _request_anthropic(document, attack, settings, client)
+    elif settings.provider == "openai":
+        text = _request_openai(document, attack, settings, client)
+    else:
+        raise LagError(f"unknown llm provider: {settings.provider!r}")
+
+    extraction = _parse_response_text(text, document, settings.model, attack)
     _write_cache(cache_path, extraction)
     return extraction
 
@@ -492,11 +741,11 @@ def run_report(
 ) -> tuple[Extraction, list[TechniqueEntry]]:
     """Load a report, extract its techniques, and turn them into scored entries."""
     document = load_document(report.source)
+    settings = resolve_llm_settings(config)
     extraction = extract_techniques(
         document,
         attack,
-        model=config.llm_model,
-        effort=config.llm_effort,
+        settings=settings,
         cache_dir=config.cache_dir,
         offline=config.offline,
         client=client,

@@ -315,6 +315,44 @@ def test_build_with_report_calls_run_report(tmp_path: Path, mini_bundle_path: Pa
     assert "Report 'Report: A Report': 1 technique(s) kept" in captured.out
 
 
+def test_build_provider_and_base_url_flow_into_config(tmp_path: Path, monkeypatch):
+    from lag.pipeline import RunResult
+
+    captured: dict = {}
+
+    def fake_run(config, progress=None):
+        captured["config"] = config
+        return RunResult(
+            attack_version="1",
+            technique_count=1,
+            layer_path=tmp_path / "layer.json",
+            csv_path=tmp_path / "analytic_plan.csv",
+        )
+
+    monkeypatch.setattr("lag.pipeline.run", fake_run)
+
+    rc = cli.main(
+        [
+            "build",
+            "--source",
+            "G0128=1",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5.5",
+            "--base-url",
+            "http://localhost:11434/v1",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert rc == 0
+    config = captured["config"]
+    assert config.llm_provider == "openai"
+    assert config.llm_model == "gpt-5.5"
+    assert config.llm_base_url == "http://localhost:11434/v1"
+
+
 # ---------------------------------------------------------------------------
 # `lag extract`
 # ---------------------------------------------------------------------------
@@ -361,7 +399,10 @@ def test_extract_writes_layer_and_prints_table(tmp_path: Path, mini_bundle_path:
     captured = capsys.readouterr()
     assert "T1547.001" in captured.out
     assert "high" in captured.out
-    assert "Kept 1 technique(s); dropped 1 unknown ID(s): T9999" in captured.out
+    assert (
+        "Kept 1 technique(s); 0 below min_confidence (medium); dropped 1 unknown ID(s): T9999" in captured.out
+    )
+    assert "In layer" in captured.out
     assert "[[custom_layers]]" in captured.out
     assert "[[reports]]" in captured.out
 
@@ -410,3 +451,34 @@ def test_extract_propagates_step_error_when_extraction_fails(tmp_path: Path, min
     assert rc == 2
     captured = capsys.readouterr()
     assert "error: Step 2/2" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# `--provider` / `--base-url`
+# ---------------------------------------------------------------------------
+
+
+def test_extract_openai_without_model_gives_model_required_error(
+    tmp_path: Path, mini_bundle_path: Path, capsys
+):
+    rc = cli.main(
+        [
+            "extract",
+            str(tmp_path / "report.txt"),
+            "--provider",
+            "openai",
+            "--stix-file",
+            str(mini_bundle_path),
+            "--offline",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert 'llm.model is required for provider "openai"' in captured.err
+
+
+def test_extract_bad_provider_choice_is_argparse_error(tmp_path: Path, mini_bundle_path: Path):
+    with pytest.raises(SystemExit):
+        cli.main(["extract", "report.txt", "--provider", "azure"])

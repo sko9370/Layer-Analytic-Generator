@@ -221,12 +221,15 @@ def run(config: Config, progress: ProgressFunc | None = None) -> RunResult:
     report_entries: list[TechniqueEntry] = []
     extractions: list[tuple[str, int, list[str]]] = []
     if config.reports:
+        from lag import extract  # lazy: only reports configured need this (and the SDK it wraps)
+
+        llm_settings = extract.resolve_llm_settings(config)
         report_entries, extractions = run_step(
             progress,
             next_step(),
             total,
-            f"Extract techniques from reports with {config.llm_model}",
-            "check ANTHROPIC_API_KEY, the report URL/path, and that the anthropic package is installed",
+            f"Extract techniques from reports with {llm_settings.provider}:{llm_settings.model}",
+            extract.llm_credentials_hint(llm_settings),
             lambda: _extract_reports_step(config, attack_data),
         )
 

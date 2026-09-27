@@ -15,7 +15,7 @@ flowchart LR
     end
     subgraph lag["LAG pipeline"]
         stix["ATT&CK STIX data (download, cache, or local file)"]
-        llm["LLM extraction (Claude API)"]
+        llm["LLM extraction (Claude or OpenAI-compatible)"]
         score["Score and order techniques"]
         analytics["Analytic sources: ATT&CK detection strategies, CAR, JPCERT"]
         plan["Build analytic plan"]
@@ -88,7 +88,7 @@ under every tactic it belongs to instead of just one.*
 	- The host vs. network split in the plan is now driven by the ATT&CK data components attached to a technique's analytics (a technique is "network" when at least 30% of its analytics' log sources use a network data component; configurable, see `network_data_components` and `network_min_share` below), instead of the free-text "data sources" field v1 used
 	- Techniques will be ordered and prioritized based on the number of overlaps across Group, Software, and Campaign IDs as this indicates that an analyst will be more likely to observe it
 	- IDs can be weighted so that a Technique associated with a higher weighted ID will be prioritized higher than a Technique associated with a lower weighted ID, all else equal; this allows the inclusion of highly relevant and less relevant IDs without diluting the priority techniques
-- Extract ATT&CK techniques directly from a threat report (URL or PDF/HTML/text file) with an LLM (Claude), so a report you don't have a matching Group/Software/Campaign ID for still feeds the plan; see "Extracting techniques from threat reports (LLM)" below
+- Extract ATT&CK techniques directly from a threat report (URL or PDF/HTML/text file) with an LLM (Anthropic's Claude, OpenAI, or any OpenAI-compatible API), so a report you don't have a matching Group/Software/Campaign ID for still feeds the plan; see "Extracting techniques from threat reports (LLM)" below
 - Get a self-contained HTML Analytic plan (`analytic_plan.html`)
 	- Provides better viewing experience by organizing information vertically (no horizontal scrolling) and navigation across different Techniques, with search and filters by tactic, category, and source
 	- Starting analytics (detection strategies, CAR, JPCERT tools) are pulled and displayed directly on the page so that the analyst doesn't have to navigate off the page to read the analytic
@@ -122,7 +122,10 @@ the full option list; the most commonly used `lag build` flags are:
   file's `[sources]` when given
 - `--report URL_OR_PATH` (repeatable): extract techniques from a threat report with an LLM and add
   it on top of the config file's `[[reports]]` (weight 1, medium confidence); see below
+- `--provider {anthropic,openai}`: override the LLM provider used for report extraction
 - `--model NAME`: override the LLM model used for report extraction
+- `--effort LEVEL`: override the LLM effort used for report extraction
+- `--base-url URL`: an OpenAI-compatible endpoint (provider `openai` only), e.g. a local Ollama server
 - `--offline`: never touch the network, fail if something isn't already cached or local
 - `--stix-file PATH`: parse a local STIX bundle instead of downloading one
 - `--output-dir PATH`: override `output_dir`
@@ -170,8 +173,14 @@ label = "Observed Activity"  # used as the source label for techniques that only
 # min_confidence = "medium"   # low, medium, high: drop anything extracted below this confidence
 
 [llm]                         # only used when [[reports]] entries are present
-model = "claude-opus-5"
-effort = "high"               # low, medium, high, xhigh, max
+provider = "anthropic"        # "anthropic" (Claude API) or "openai" (OpenAI or any OpenAI-compatible API)
+model = ""                    # "" = claude-opus-5 for anthropic; provider "openai" has no default, required
+effort = ""                   # "" = provider default ("high" for anthropic, omitted for openai)
+                              # anthropic: low, medium, high, xhigh, max
+                              # openai: none, minimal, low, medium, high, xhigh, max
+base_url = ""                 # openai only: an OpenAI-compatible endpoint (Azure OpenAI, Ollama, vLLM, LM Studio)
+api_key_env = ""              # "" = SDK default (ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai)
+pdf_input = "auto"            # "auto", "native" (send the PDF itself), or "text" (extract text locally with pypdf)
 
 [attack]
 version = ""                 # "" = latest release; or pin a version like "19.2"
@@ -198,8 +207,10 @@ enabled = true       # build the self-contained analytic_plan.html in addition t
 Validation runs when the config is loaded: source IDs must match `G####`/`S####`/`C####`
 (case-insensitive, normalized to upper case), weights must be positive integers, you need at least
 one source, custom layer, or report, `gradient` needs at least two `#RRGGBB` or `#RRGGBBAA` colors,
-`min_confidence` and `effort` must be one of the levels listed above, and `llm.model` must be a
-non-empty string.
+`min_confidence` must be one of the levels listed above, `llm.provider` must be `anthropic` or
+`openai`, `llm.effort` must be one of that provider's levels (or `""`), `llm.pdf_input` must be
+`auto`, `native`, or `text`, `llm.base_url` is only allowed with provider `openai`, and if any
+`[[reports]]` are configured with provider `openai`, `llm.model` must be a non-empty string.
 
 ## Outputs
 
@@ -219,16 +230,56 @@ non-empty string.
 
 When a threat you're building a plan for doesn't have a matching Group, Software, or Campaign ID
 (or you just have a PDF, blog post, or advisory to work from), LAG can read that report with an LLM
-(Anthropic's Claude) and turn it into ATT&CK techniques with evidence, the same way each other
-source feeds the plan. This replaces the old "Future Works" TRAM idea with a feature that ships in
-the box.
+and turn it into ATT&CK techniques with evidence, the same way each other source feeds the plan.
+This replaces the old "Future Works" TRAM idea with a feature that ships in the box.
 
-**Setup**: install the extra and set credentials once:
+Two providers are supported, set with `llm.provider` (or `--provider`):
+
+- **`anthropic`** (default): the Claude API. Default model `claude-opus-5`.
+- **`openai`**: the OpenAI API, or any OpenAI-compatible API (Azure OpenAI, Ollama, vLLM, LM
+  Studio, ...) by also setting `llm.base_url` (or `--base-url`). There is no default model for
+  this provider; you must set `llm.model` (or `--model`) to the model name your account or
+  endpoint serves.
+
+**Setup**: install the extra for the provider(s) you use, and set credentials once:
 
 ```bash
-pip install "layer-analytic-generator[llm]"
+pip install "layer-analytic-generator[anthropic]"   # Claude API only
+pip install "layer-analytic-generator[openai]"       # OpenAI or an OpenAI-compatible API only
+pip install "layer-analytic-generator[llm]"          # both providers
 export ANTHROPIC_API_KEY=...      # or: ant auth login
+export OPENAI_API_KEY=...         # for provider "openai"
 ```
+
+Set `llm.api_key_env` to read the key from a different environment variable instead of the SDK
+default (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). A local OpenAI-compatible server (Ollama, vLLM,
+LM Studio) usually needs no key at all.
+
+### Choosing a model
+
+Extraction is structured extraction plus ATT&CK mapping judgment: picking the right technique, and
+the right sub-technique, from a report's prose. Claude Sonnet 5 (`claude-sonnet-5`) handles this
+well and costs 2.5x less per token than Opus 5 ($2/$10 vs $5/$25 per million input/output tokens at the time of writing; check current pricing);
+a typical 20-40 page report runs roughly 20K to 60K input tokens, so either model costs cents to
+tens of cents per report, and results are cached. Opus 5 is the default because it gives the best
+mapping judgment on long or dense reports (for example picking the right sub-technique); set
+`model = "claude-sonnet-5"` to cut cost. Every returned technique ID is validated against the
+loaded ATT&CK data either way, so a weaker model mostly risks missed or less specific techniques,
+not invalid ones; review the table before briefing. Local models via OpenAI-compatible servers work
+if they support JSON-schema structured output; smaller models may miss more techniques, so compare
+their output against a Claude run on a report you know before relying on them.
+
+### PDF input: native vs text
+
+`llm.pdf_input` controls how a PDF report reaches the model:
+
+- **`native`**: the PDF file itself is sent to the model. This is the default for Anthropic, and
+  for OpenAI when there's no `base_url` (i.e. the real OpenAI API).
+  Requires a model that accepts PDF file input.
+- **`text`**: text is extracted locally with `pypdf` and sent as plain text. This is the default
+  for provider `openai` with a `base_url` set, since most OpenAI-compatible servers can't take PDF
+  file input. A scanned PDF (no extractable text) fails with a clear error; OCR it first.
+- **`auto`** (default): picks `native` or `text` per the rules above.
 
 **Review workflow**: extract a single report to a standalone layer you can inspect before trusting it:
 
@@ -239,8 +290,8 @@ lag extract https://example.com/report.pdf
 This loads ATT&CK, runs the extraction, prints a table of technique ID / confidence / technique
 name / evidence to stdout, and writes a Navigator layer (default
 `<output_dir>/report_<slug>.json`) you can open in Navigator or add under `[[custom_layers]]` once
-you trust it. Useful flags: `-c/--config`, `--label`, `--model`, `--effort`, `--min-confidence`,
-`--weight`, `-o/--output`, `--stix-file`, `--offline`.
+you trust it. Useful flags: `-c/--config`, `--label`, `--provider`, `--model`, `--effort`,
+`--base-url`, `--min-confidence`, `--weight`, `-o/--output`, `--stix-file`, `--offline`.
 
 **Automatic workflow**: add the report directly to your plan so it's re-extracted (from cache) on
 every build:
@@ -253,29 +304,32 @@ weight = 1
 min_confidence = "medium"
 
 [llm]
-model = "claude-opus-5"
-effort = "high"
+provider = "anthropic"
+model = ""              # "" = claude-opus-5
+effort = ""             # "" = provider default ("high" for anthropic)
 ```
 
 or from the command line: `lag build --report https://example.com/report.pdf --model claude-opus-5`
 (repeatable; adds on top of any `[[reports]]` already in the config, weight 1, medium confidence).
+`--provider`, `--model`, `--effort`, and `--base-url` apply to every report in the run.
 
 **Confidence and weight**: each extracted technique carries a confidence (`low`, `medium`, `high`);
 anything below a report's `min_confidence` is dropped before scoring. `weight` behaves exactly like
 a Group/Software/Campaign ID's weight, once per technique the report supports.
 
-**Caching**: extractions are cached under `attack.cache_dir` by the document's content hash, model,
-and effort, so rebuilding the plan does not re-run (or re-bill) the LLM unless the report, model, or
-effort changes.
+**Caching**: extractions are cached under `attack.cache_dir` by the document's content hash,
+provider, model, effort, base URL, and PDF input mode, so rebuilding the plan does not re-run (or
+re-bill) the LLM unless one of those changes.
 
-**Costs**: extraction is billed per token by Anthropic; a long PDF costs more than a short one, and
-raising `effort` can also increase cost. Check the current model's pricing before extracting a lot
-of reports.
+**Costs**: extraction is billed per token by the provider; a long PDF costs more than a short one,
+and raising `effort` can also increase cost. Local OpenAI-compatible servers are typically free to
+run. Check the current model's pricing before extracting a lot of reports.
 
 **Refusals**: threat reports describe malware and intrusions, which can occasionally trigger a
-model's safety classifiers. LAG enables the API's server-side fallback, so a declined request is
-retried on another Claude model within the same call; if every model declines, the step fails with
-the refusal category in the error.
+model's safety classifiers. For Anthropic, LAG enables the API's server-side fallback, so a
+declined request is retried on another Claude model within the same call; if every model declines,
+the step fails with the refusal category in the error. For OpenAI, a refusal fails the step with
+the refusal text.
 
 **Limits**: PDFs over 32 MB are rejected. A page that needs JavaScript or a login to render its
 text won't extract cleanly; save it as a PDF and pass the file instead of the URL.
@@ -319,10 +373,12 @@ The steps, in order, and their common fixes:
    `enterprise-attack.json`, or make sure `attack.offline` runs have a warm `cache_dir`.
 2. **Read custom layers** (only if `[[custom_layers]]` is configured): parses each layer file. Fix:
    check the path and that the file is a real Navigator layer JSON export.
-3. **Extract techniques from reports with `<model>`** (only if `[[reports]]`/`--report` is
-   configured): runs the LLM extraction for each report. Fix: check `ANTHROPIC_API_KEY` (or
-   `ant auth login`), the report URL/path, and that `pip install "layer-analytic-generator[llm]"`
-   has been run.
+3. **Extract techniques from reports with `<provider>:<model>`** (only if `[[reports]]`/`--report`
+   is configured): runs the LLM extraction for each report. Fix: for `anthropic`, check
+   `ANTHROPIC_API_KEY` (or `ant auth login`); for `openai`, check `OPENAI_API_KEY` (or
+   `llm.api_key_env`) and, if set, that `llm.base_url` is reachable; either way check the report
+   URL/path and that the matching extra is installed (`pip install
+   "layer-analytic-generator[anthropic]"`, `[openai]`, or `[llm]` for both).
 4. **Score techniques**: applies weights and merges sources. Fix: check source IDs at
    [https://attack.mitre.org](https://attack.mitre.org) (groups `G####`, software `S####`,
    campaigns `C####`); the run fails outright if nothing scored.

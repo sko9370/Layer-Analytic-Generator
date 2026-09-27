@@ -1,43 +1,67 @@
-"""Tests for lag.extract: report loading and LLM (Claude) technique extraction.
+"""Tests for lag.extract: report loading and LLM (Claude, OpenAI) technique extraction.
 
-No test talks to the real network or the real Anthropic API: requests.get and the anthropic
-client are always faked or monkeypatched.
+No test talks to the real network or a real LLM API: requests.get and the anthropic/openai
+clients are always faked or monkeypatched.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import anthropic
 import httpx2
+import openai
 import pytest
 import requests
 
 from lag.attack import parse_bundle
 from lag.errors import LagError
 from lag.extract import (
+    OPENAI_MODEL_REQUIRED_MSG,
     SCHEMA,
     Document,
     ExtractedTechnique,
     Extraction,
+    LlmSettings,
     _cache_path,
     default_label,
     extract_techniques,
     extraction_to_entries,
+    llm_credentials_hint,
     load_document,
+    resolve_llm_settings,
     run_report,
 )
-from lag.models import ReportSource
+from lag.models import Config, ReportSource
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 TINY_PDF = b"%PDF-1.4\n%%EOF\n"
 LONG_TEXT = "This report describes adversary activity in detail. " * 10  # > 200 chars
 SHORT_TEXT = "Too short."
+
+
+def _settings(
+    provider: str = "anthropic",
+    model: str = "claude-opus-5",
+    effort: str | None = "high",
+    base_url: str = "",
+    api_key_env: str = "",
+    pdf_input: str = "native",
+) -> LlmSettings:
+    return LlmSettings(
+        provider=provider,
+        model=model,
+        effort=effort,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        pdf_input=pdf_input,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -87,6 +111,40 @@ class FakeClient:
 def make_message(stop_reason="end_turn", stop_details=None, text=None):
     content = [SimpleNamespace(type="text", text=text)] if text is not None else []
     return SimpleNamespace(stop_reason=stop_reason, stop_details=stop_details, content=content)
+
+
+# ---------------------------------------------------------------------------
+# fakes for the OpenAI SDK
+# ---------------------------------------------------------------------------
+
+
+class FakeCompletions:
+    def __init__(self, response=None, error=None):
+        self._response = response
+        self._error = error
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return self._response
+
+
+class FakeOpenAIClient:
+    def __init__(self, response=None, error=None):
+        self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
+
+
+def make_openai_response(finish_reason="stop", content=None, refusal=None):
+    message = SimpleNamespace(content=content, refusal=refusal)
+    choice = SimpleNamespace(finish_reason=finish_reason, message=message)
+    return SimpleNamespace(choices=[choice])
+
+
+def make_openai_error_response(status_code: int, body: dict) -> httpx2.Response:
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    return httpx2.Response(status_code, request=request, json=body)
 
 
 def valid_payload(techniques=None, title="Some Report"):
@@ -275,7 +333,7 @@ def test_extract_cache_hit_skips_client(tmp_path: Path, attack, caplog: pytest.L
         data=TINY_PDF,
         sha256="deadbeef",
     )
-    cache_path = _cache_path(document, "claude-opus-5", "high", tmp_path)
+    cache_path = _cache_path(document, _settings(), tmp_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps(
@@ -300,8 +358,7 @@ def test_extract_cache_hit_skips_client(tmp_path: Path, attack, caplog: pytest.L
         extraction = extract_techniques(
             document,
             attack,
-            model="claude-opus-5",
-            effort="high",
+            settings=_settings(),
             cache_dir=tmp_path,
             client=ExplodingClient(),
         )
@@ -319,8 +376,7 @@ def test_extract_offline_without_cache_raises(tmp_path: Path, attack) -> None:
         extract_techniques(
             document,
             attack,
-            model="claude-opus-5",
-            effort="high",
+            settings=_settings(),
             cache_dir=tmp_path,
             offline=True,
             client=FakeClient(),
@@ -335,7 +391,7 @@ def test_extract_missing_anthropic_package_raises(
     )
     monkeypatch.setitem(sys.modules, "anthropic", None)
     with pytest.raises(LagError, match="pip install"):
-        extract_techniques(document, attack, model="claude-opus-5", effort="high", cache_dir=tmp_path)
+        extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path)
 
 
 def test_extract_success_writes_cache(tmp_path: Path, attack) -> None:
@@ -344,9 +400,7 @@ def test_extract_success_writes_cache(tmp_path: Path, attack) -> None:
     )
     message = make_message(text=valid_payload())
     client = FakeClient(message=message)
-    extraction = extract_techniques(
-        document, attack, model="claude-opus-5", effort="high", cache_dir=tmp_path, client=client
-    )
+    extraction = extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path, client=client)
     assert extraction.title == "Some Report"
     assert [t.technique_id for t in extraction.techniques] == ["T1059.003"]
     assert extraction.dropped == []
@@ -359,7 +413,7 @@ def test_extract_success_writes_cache(tmp_path: Path, attack) -> None:
     assert call["output_config"]["format"]["schema"] == SCHEMA
     assert call["messages"][0]["content"][0]["type"] == "document"
 
-    cache_path = _cache_path(document, "claude-opus-5", "high", tmp_path)
+    cache_path = _cache_path(document, _settings(), tmp_path)
     assert cache_path.is_file()
 
 
@@ -368,7 +422,7 @@ def test_extract_refusal_raises(tmp_path: Path, attack) -> None:
     message = make_message(stop_reason="refusal", stop_details=SimpleNamespace(category="cyber"))
     client = FakeClient(message=message)
     with pytest.raises(LagError, match="cyber"):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=client)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client)
 
 
 def test_extract_max_tokens_raises(tmp_path: Path, attack) -> None:
@@ -376,7 +430,7 @@ def test_extract_max_tokens_raises(tmp_path: Path, attack) -> None:
     message = make_message(stop_reason="max_tokens")
     client = FakeClient(message=message)
     with pytest.raises(LagError, match="shorter document"):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=client)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client)
 
 
 def test_extract_invalid_json_raises(tmp_path: Path, attack) -> None:
@@ -384,7 +438,7 @@ def test_extract_invalid_json_raises(tmp_path: Path, attack) -> None:
     message = make_message(text="not json{")
     client = FakeClient(message=message)
     with pytest.raises(LagError, match="not valid JSON"):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=client)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client)
 
 
 def test_extract_unknown_ids_dropped(tmp_path: Path, attack, caplog: pytest.LogCaptureFixture) -> None:
@@ -399,7 +453,7 @@ def test_extract_unknown_ids_dropped(tmp_path: Path, attack, caplog: pytest.LogC
     client = FakeClient(message=message)
     with caplog.at_level(logging.WARNING):
         extraction = extract_techniques(
-            document, attack, model="m", effort="high", cache_dir=tmp_path, client=client
+            document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client
         )
     assert [t.technique_id for t in extraction.techniques] == ["T1059.003"]
     assert extraction.dropped == ["T9999"]
@@ -417,7 +471,7 @@ def test_extract_dedupes_keeping_highest_confidence(tmp_path: Path, attack) -> N
     message = make_message(text=payload)
     client = FakeClient(message=message)
     extraction = extract_techniques(
-        document, attack, model="m", effort="high", cache_dir=tmp_path, client=client
+        document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client
     )
     assert len(extraction.techniques) == 1
     kept = extraction.techniques[0]
@@ -446,7 +500,7 @@ def test_extract_maps_sdk_status_errors(tmp_path: Path, attack, exc, match) -> N
     document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256=f"err-{match}")
     client = FakeClient(error=exc)
     with pytest.raises(LagError, match=match):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=client)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client)
 
 
 def test_extract_maps_connection_error(tmp_path: Path, attack) -> None:
@@ -454,7 +508,7 @@ def test_extract_maps_connection_error(tmp_path: Path, attack) -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     client = FakeClient(error=anthropic.APIConnectionError(request=request))
     with pytest.raises(LagError, match="could not reach"):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=client)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=client)
 
 
 def test_extract_client_construction_failure_gets_auth_hint(
@@ -467,7 +521,7 @@ def test_extract_client_construction_failure_gets_auth_hint(
 
     monkeypatch.setattr(anthropic, "Anthropic", boom)
     with pytest.raises(LagError, match="ANTHROPIC_API_KEY"):
-        extract_techniques(document, attack, model="m", effort="high", cache_dir=tmp_path, client=None)
+        extract_techniques(document, attack, settings=_settings(model="m"), cache_dir=tmp_path, client=None)
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +570,16 @@ def test_run_report_end_to_end(tmp_path: Path, attack) -> None:
     report = ReportSource(source=str(path), weight=3)
     message = make_message(text=valid_payload(title="Found Report"))
     client = FakeClient(message=message)
-    config = SimpleNamespace(llm_model="claude-opus-5", llm_effort="high", cache_dir=tmp_path, offline=False)
+    config = SimpleNamespace(
+        llm_provider="anthropic",
+        llm_model="claude-opus-5",
+        llm_effort="high",
+        llm_base_url="",
+        llm_api_key_env="",
+        llm_pdf_input="native",
+        cache_dir=tmp_path,
+        offline=False,
+    )
     extraction, entries = run_report(report, attack, config, client=client)
     assert extraction.title == "Found Report"
     assert len(entries) == 1
@@ -529,7 +592,7 @@ def test_extract_cache_hit_drops_ids_missing_from_current_attack(tmp_path: Path,
     document = Document(
         source="report.pdf", title="Old", media_type="application/pdf", data=TINY_PDF, sha256="cafe"
     )
-    cache_path = _cache_path(document, "claude-opus-5", "high", tmp_path)
+    cache_path = _cache_path(document, _settings(), tmp_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps(
@@ -545,7 +608,7 @@ def test_extract_cache_hit_drops_ids_missing_from_current_attack(tmp_path: Path,
         ),
         encoding="utf-8",
     )
-    extraction = extract_techniques(document, attack, model="claude-opus-5", cache_dir=tmp_path)
+    extraction = extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path)
     assert [t.technique_id for t in extraction.techniques] == ["T1059"]
     assert extraction.dropped == ["T1066"]
 
@@ -564,6 +627,449 @@ def test_extract_missing_credentials_gives_clear_error(tmp_path: Path, attack) -
             messages = NoCredsMessages()
 
     with pytest.raises(LagError, match="no Anthropic credentials found"):
+        extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path, client=NoCredsClient())
+
+
+# ---------------------------------------------------------------------------
+# resolve_llm_settings
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_llm_settings_anthropic_defaults() -> None:
+    config = Config(sources={"G0128": 1})
+    settings = resolve_llm_settings(config)
+    assert settings.provider == "anthropic"
+    assert settings.model == "claude-opus-5"
+    assert settings.effort == "high"
+    assert settings.pdf_input == "native"
+
+
+def test_resolve_llm_settings_anthropic_explicit_values_kept() -> None:
+    config = Config(sources={"G0128": 1}, llm_model="claude-sonnet-5", llm_effort="low")
+    settings = resolve_llm_settings(config)
+    assert settings.model == "claude-sonnet-5"
+    assert settings.effort == "low"
+
+
+def test_resolve_llm_settings_openai_without_model_raises() -> None:
+    config = Config(sources={"G0128": 1}, llm_provider="openai")
+    with pytest.raises(LagError, match=re.escape(OPENAI_MODEL_REQUIRED_MSG)):
+        resolve_llm_settings(config)
+
+
+def test_resolve_llm_settings_openai_effort_none_when_unset() -> None:
+    config = Config(sources={"G0128": 1}, llm_provider="openai", llm_model="gpt-5.5")
+    settings = resolve_llm_settings(config)
+    assert settings.effort is None
+    assert settings.pdf_input == "native"
+
+
+def test_resolve_llm_settings_openai_keeps_explicit_effort() -> None:
+    config = Config(sources={"G0128": 1}, llm_provider="openai", llm_model="gpt-5.5", llm_effort="minimal")
+    settings = resolve_llm_settings(config)
+    assert settings.effort == "minimal"
+
+
+def test_resolve_llm_settings_openai_with_base_url_defaults_pdf_input_to_text() -> None:
+    config = Config(
+        sources={"G0128": 1},
+        llm_provider="openai",
+        llm_model="gpt-5.5",
+        llm_base_url="http://localhost:11434/v1",
+    )
+    settings = resolve_llm_settings(config)
+    assert settings.pdf_input == "text"
+    assert settings.base_url == "http://localhost:11434/v1"
+
+
+def test_resolve_llm_settings_explicit_pdf_input_kept() -> None:
+    config = Config(
+        sources={"G0128": 1},
+        llm_provider="openai",
+        llm_model="gpt-5.5",
+        llm_base_url="http://localhost:11434/v1",
+        llm_pdf_input="native",
+    )
+    settings = resolve_llm_settings(config)
+    assert settings.pdf_input == "native"
+
+
+# ---------------------------------------------------------------------------
+# llm_credentials_hint
+# ---------------------------------------------------------------------------
+
+
+def test_llm_credentials_hint_anthropic() -> None:
+    hint = llm_credentials_hint(_settings(provider="anthropic"))
+    assert "ANTHROPIC_API_KEY" in hint
+    assert "ant auth login" in hint
+
+
+def test_llm_credentials_hint_openai_with_base_url() -> None:
+    hint = llm_credentials_hint(
+        _settings(provider="openai", model="gpt-5.5", base_url="http://localhost:11434/v1")
+    )
+    assert "OPENAI_API_KEY" in hint
+    assert "http://localhost:11434/v1" in hint
+
+
+def test_llm_credentials_hint_openai_custom_key_env() -> None:
+    hint = llm_credentials_hint(_settings(provider="openai", model="gpt-5.5", api_key_env="MY_KEY"))
+    assert "MY_KEY" in hint
+
+
+# ---------------------------------------------------------------------------
+# cache key
+# ---------------------------------------------------------------------------
+
+
+def test_cache_key_differs_by_provider_model_effort_base_url_and_pdf_input(tmp_path: Path) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="samehash")
+    paths = {
+        _cache_path(document, _settings(provider="anthropic", model="claude-opus-5"), tmp_path),
+        _cache_path(document, _settings(provider="openai", model="claude-opus-5"), tmp_path),
+        _cache_path(
+            document, _settings(provider="openai", model="claude-opus-5", base_url="http://x"), tmp_path
+        ),
+        _cache_path(
+            document, _settings(provider="openai", model="claude-opus-5", pdf_input="text"), tmp_path
+        ),
+        _cache_path(document, _settings(provider="anthropic", model="claude-opus-5", effort="low"), tmp_path),
+        _cache_path(document, _settings(provider="anthropic", model="claude-sonnet-5"), tmp_path),
+    }
+    assert len(paths) == 6
+
+
+# ---------------------------------------------------------------------------
+# OpenAI request shape and happy path
+# ---------------------------------------------------------------------------
+
+
+def test_openai_happy_path_native_pdf(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="oa-native"
+    )
+    response = make_openai_response(content=valid_payload())
+    client = FakeOpenAIClient(response=response)
+    settings = _settings(provider="openai", model="gpt-5.5", effort="medium", pdf_input="native")
+
+    extraction = extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+    assert extraction.title == "Some Report"
+    assert [t.technique_id for t in extraction.techniques] == ["T1059.003"]
+
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "gpt-5.5"
+    assert call["reasoning_effort"] == "medium"
+    assert call["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "attack_techniques", "schema": SCHEMA, "strict": True},
+    }
+    user_content = call["messages"][1]["content"]
+    assert user_content[0]["type"] == "file"
+    assert user_content[0]["file"]["filename"] == "R"
+    assert user_content[0]["file"]["file_data"].startswith("data:application/pdf;base64,")
+
+    cache_path = _cache_path(document, settings, tmp_path)
+    assert cache_path.is_file()
+
+
+def test_openai_text_mode_sends_text_part(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-text"
+    )
+    response = make_openai_response(content=valid_payload())
+    client = FakeOpenAIClient(response=response)
+    settings = _settings(provider="openai", model="gpt-5.5", pdf_input="text")
+
+    extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+
+    call = client.chat.completions.calls[0]
+    user_content = call["messages"][1]["content"]
+    assert user_content[0]["type"] == "text"
+    assert "<document title=" in user_content[0]["text"]
+    assert LONG_TEXT in user_content[0]["text"]
+
+
+def test_openai_reasoning_effort_omitted_when_not_set(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-noeffort"
+    )
+    response = make_openai_response(content=valid_payload())
+    client = FakeOpenAIClient(response=response)
+    settings = _settings(provider="openai", model="gpt-5.5", effort=None)
+
+    extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+
+    call = client.chat.completions.calls[0]
+    assert "reasoning_effort" not in call
+
+
+def test_openai_refusal_raises(tmp_path: Path, attack) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-refusal")
+    response = make_openai_response(content=None, refusal="policy violation")
+    client = FakeOpenAIClient(response=response)
+    with pytest.raises(LagError, match="policy violation"):
         extract_techniques(
-            document, attack, model="claude-opus-5", cache_dir=tmp_path, client=NoCredsClient()
+            document,
+            attack,
+            settings=_settings(provider="openai", model="gpt-5.5"),
+            cache_dir=tmp_path,
+            client=client,
         )
+
+
+def test_openai_length_finish_reason_raises(tmp_path: Path, attack) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-length")
+    response = make_openai_response(finish_reason="length", content="{}")
+    client = FakeOpenAIClient(response=response)
+    with pytest.raises(LagError, match="max_completion_tokens"):
+        extract_techniques(
+            document,
+            attack,
+            settings=_settings(provider="openai", model="gpt-5.5"),
+            cache_dir=tmp_path,
+            client=client,
+        )
+
+
+def test_openai_content_filter_finish_reason_raises(tmp_path: Path, attack) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-cf")
+    response = make_openai_response(finish_reason="content_filter", content=None)
+    client = FakeOpenAIClient(response=response)
+    with pytest.raises(LagError, match="content filter"):
+        extract_techniques(
+            document,
+            attack,
+            settings=_settings(provider="openai", model="gpt-5.5"),
+            cache_dir=tmp_path,
+            client=client,
+        )
+
+
+def test_openai_empty_content_raises(tmp_path: Path, attack) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-empty")
+    response = make_openai_response(content="")
+    client = FakeOpenAIClient(response=response)
+    with pytest.raises(LagError, match="no content"):
+        extract_techniques(
+            document,
+            attack,
+            settings=_settings(provider="openai", model="gpt-5.5"),
+            cache_dir=tmp_path,
+            client=client,
+        )
+
+
+@pytest.mark.parametrize(
+    ("exc", "match"),
+    [
+        (
+            openai.AuthenticationError("bad key", response=make_openai_error_response(401, {}), body={}),
+            "OPENAI_API_KEY",
+        ),
+        (
+            openai.PermissionDeniedError("no access", response=make_openai_error_response(403, {}), body={}),
+            "access denied",
+        ),
+        (openai.NotFoundError("no model", response=make_openai_error_response(404, {}), body={}), "model"),
+        (
+            openai.RateLimitError("slow down", response=make_openai_error_response(429, {}), body={}),
+            "rate limit",
+        ),
+        (
+            openai.BadRequestError("bad schema", response=make_openai_error_response(400, {}), body={}),
+            "structured outputs",
+        ),
+        (
+            openai.APIStatusError("server broke", response=make_openai_error_response(500, {}), body={}),
+            "status 500",
+        ),
+    ],
+)
+def test_openai_maps_sdk_status_errors(tmp_path: Path, attack, exc, match) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256=f"oa-err-{match}")
+    client = FakeOpenAIClient(error=exc)
+    with pytest.raises(LagError, match=match):
+        extract_techniques(
+            document,
+            attack,
+            settings=_settings(provider="openai", model="gpt-5.5"),
+            cache_dir=tmp_path,
+            client=client,
+        )
+
+
+def test_openai_maps_connection_error_with_base_url_hint(tmp_path: Path, attack) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-conn")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    client = FakeOpenAIClient(error=openai.APIConnectionError(request=request))
+    settings = _settings(provider="openai", model="gpt-5.5", base_url="http://127.0.0.1:9/v1")
+    with pytest.raises(LagError, match="could not reach") as excinfo:
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+    assert "http://127.0.0.1:9/v1" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI client construction: api_key_env, base_url fallback, missing credentials
+# ---------------------------------------------------------------------------
+
+
+def test_openai_api_key_env_used(tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MY_OPENAI_KEY", "secret-value")
+    captured: dict = {}
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return FakeOpenAIClient(response=make_openai_response(content=valid_payload()))
+
+    monkeypatch.setattr(openai, "OpenAI", fake_openai)
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-keyenv"
+    )
+    settings = _settings(provider="openai", model="gpt-5.5", api_key_env="MY_OPENAI_KEY")
+
+    extraction = extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=None)
+    assert captured["api_key"] == "secret-value"
+    assert extraction.title == "Some Report"
+
+
+def test_openai_api_key_env_missing_raises(tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SOME_MISSING_KEY", raising=False)
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-keyenvmissing"
+    )
+    settings = _settings(provider="openai", model="gpt-5.5", api_key_env="SOME_MISSING_KEY")
+    with pytest.raises(LagError, match="SOME_MISSING_KEY"):
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=None)
+
+
+def test_openai_base_url_without_key_uses_not_needed(
+    tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    captured: dict = {}
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return FakeOpenAIClient(response=make_openai_response(content=valid_payload()))
+
+    monkeypatch.setattr(openai, "OpenAI", fake_openai)
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-notneeded"
+    )
+    settings = _settings(provider="openai", model="gpt-5.5", base_url="http://localhost:11434/v1")
+
+    extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=None)
+    assert captured["api_key"] == "not-needed"
+    assert captured["base_url"] == "http://localhost:11434/v1"
+
+
+def test_openai_missing_credentials_gives_clear_error(
+    tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def boom(**kwargs):
+        raise openai.OpenAIError("Missing credentials.")
+
+    monkeypatch.setattr(openai, "OpenAI", boom)
+    document = Document(
+        source="r", title="T", media_type="text/plain", data=LONG_TEXT.encode(), sha256="oa-nocreds"
+    )
+    settings = _settings(provider="openai", model="gpt-5.5")
+    with pytest.raises(LagError, match="no OpenAI credentials found"):
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=None)
+
+
+def test_extract_missing_openai_package_raises(
+    tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = Document(source="r", title="T", media_type="text/plain", data=b"x", sha256="oa-nopkg")
+    monkeypatch.setitem(sys.modules, "openai", None)
+    settings = _settings(provider="openai", model="gpt-5.5")
+    with pytest.raises(LagError, match="pip install"):
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# PDF as text (pypdf), for either provider
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_as_text_extracts_via_pypdf(tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="pdf-text-ok"
+    )
+
+    class FakePage:
+        def extract_text(self):
+            return LONG_TEXT
+
+    class FakeReader:
+        def __init__(self, stream):
+            self.pages = [FakePage(), FakePage()]
+
+    import pypdf
+
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+
+    message = make_message(text=valid_payload())
+    client = FakeClient(message=message)
+    settings = _settings(pdf_input="text")
+
+    extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+
+    call = client.beta.messages.calls[0]
+    document_block = call["messages"][0]["content"][0]
+    assert document_block["source"]["type"] == "text"
+    assert LONG_TEXT in document_block["source"]["data"]
+
+
+def test_pdf_as_text_scanned_pdf_raises(tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="pdf-scanned"
+    )
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakeReader:
+        def __init__(self, stream):
+            self.pages = [FakePage()]
+
+    import pypdf
+
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+
+    settings = _settings(pdf_input="text")
+    with pytest.raises(LagError, match="looks scanned"):
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=FakeClient())
+
+
+def test_pdf_as_text_missing_pypdf_raises(tmp_path: Path, attack, monkeypatch: pytest.MonkeyPatch) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="pdf-nopypdf"
+    )
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    settings = _settings(pdf_input="text")
+    with pytest.raises(LagError, match="pip install"):
+        extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=FakeClient())
+
+
+def test_parse_response_text_accepts_code_fenced_json(attack) -> None:
+    from lag.extract import _parse_response_text
+
+    document = Document(source="r.txt", title="R", media_type="text/plain", data=b"x", sha256="f")
+    item = {"technique_id": "t1059", "evidence": "e", "quote": "q", "confidence": "high"}
+    text = "```json\n" + json.dumps({"report_title": "R", "techniques": [item]}) + "\n```"
+    extraction = _parse_response_text(text, document, "m", attack)
+    assert [t.technique_id for t in extraction.techniques] == ["T1059"]
+
+
+def test_parse_response_text_rejects_non_object(attack) -> None:
+    from lag.extract import _parse_response_text
+
+    document = Document(source="r.txt", title="R", media_type="text/plain", data=b"x", sha256="f")
+    with pytest.raises(LagError, match="not a JSON object"):
+        _parse_response_text("[1, 2]", document, "m", attack)

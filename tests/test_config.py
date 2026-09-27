@@ -282,8 +282,12 @@ def test_report_label_and_weight_override(tmp_path: Path) -> None:
 
 def test_llm_defaults(tmp_path: Path) -> None:
     config = config_from_dict(MINIMAL, tmp_path)
-    assert config.llm_model == "claude-opus-5"
-    assert config.llm_effort == "high"
+    assert config.llm_provider == "anthropic"
+    assert config.llm_model == ""
+    assert config.llm_effort == ""
+    assert config.llm_base_url == ""
+    assert config.llm_api_key_env == ""
+    assert config.llm_pdf_input == "auto"
 
 
 def test_llm_model_and_effort_override(tmp_path: Path) -> None:
@@ -305,10 +309,71 @@ def test_llm_bad_effort_raises(tmp_path: Path) -> None:
         config_from_dict(data, tmp_path)
 
 
-def test_llm_empty_model_raises(tmp_path: Path) -> None:
+def test_llm_effort_valid_for_openai_but_invalid_for_anthropic(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "llm": {"provider": "openai", "model": "gpt-5.5", "effort": "minimal"}}
+    config = config_from_dict(data, tmp_path)
+    assert config.llm_effort == "minimal"
+
+    bad = {"sources": {"G0128": 1}, "llm": {"provider": "anthropic", "effort": "minimal"}}
+    with pytest.raises(LagError, match="llm.effort"):
+        config_from_dict(bad, tmp_path)
+
+
+def test_llm_empty_model_is_valid_by_default(tmp_path: Path) -> None:
     data = {"sources": {"G0128": 1}, "llm": {"model": ""}}
-    with pytest.raises(LagError, match="llm.model"):
+    config = config_from_dict(data, tmp_path)
+    assert config.llm_model == ""
+
+
+def test_llm_bad_provider_raises(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "llm": {"provider": "azure"}}
+    with pytest.raises(LagError, match="llm.provider"):
         config_from_dict(data, tmp_path)
+
+
+def test_llm_base_url_requires_openai_provider(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "llm": {"base_url": "http://localhost:11434/v1"}}
+    with pytest.raises(LagError, match="llm.base_url"):
+        config_from_dict(data, tmp_path)
+
+
+def test_llm_base_url_allowed_with_openai_provider(tmp_path: Path) -> None:
+    data = {
+        "sources": {"G0128": 1},
+        "llm": {"provider": "openai", "model": "gpt-5.5", "base_url": "http://localhost:11434/v1"},
+    }
+    config = config_from_dict(data, tmp_path)
+    assert config.llm_base_url == "http://localhost:11434/v1"
+
+
+def test_llm_bad_pdf_input_raises(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "llm": {"pdf_input": "images"}}
+    with pytest.raises(LagError, match="llm.pdf_input"):
+        config_from_dict(data, tmp_path)
+
+
+def test_llm_api_key_env_parses(tmp_path: Path) -> None:
+    data = {"sources": {"G0128": 1}, "llm": {"api_key_env": "MY_KEY"}}
+    config = config_from_dict(data, tmp_path)
+    assert config.llm_api_key_env == "MY_KEY"
+
+
+def test_reports_with_openai_provider_and_no_model_raises(tmp_path: Path) -> None:
+    data = {
+        "reports": [{"source": "https://example.com/report.pdf"}],
+        "llm": {"provider": "openai"},
+    }
+    with pytest.raises(LagError, match='llm.model is required for provider "openai"'):
+        config_from_dict(data, tmp_path)
+
+
+def test_reports_with_openai_provider_and_model_ok(tmp_path: Path) -> None:
+    data = {
+        "reports": [{"source": "https://example.com/report.pdf"}],
+        "llm": {"provider": "openai", "model": "gpt-5.5"},
+    }
+    config = config_from_dict(data, tmp_path)
+    assert config.llm_model == "gpt-5.5"
 
 
 def test_example_config_reports_are_commented_out(tmp_path: Path) -> None:
@@ -320,8 +385,10 @@ def test_example_config_reports_are_commented_out(tmp_path: Path) -> None:
 def test_example_config_llm_table(tmp_path: Path) -> None:
     data = tomllib.loads(EXAMPLE_CONFIG)
     config = config_from_dict(data, tmp_path)
-    assert config.llm_model == "claude-opus-5"
-    assert config.llm_effort == "high"
+    assert config.llm_provider == "anthropic"
+    assert config.llm_model == ""
+    assert config.llm_effort == ""
+    assert config.llm_pdf_input == "auto"
 
 
 @pytest.mark.parametrize("value", [0, 1.5, -0.1, True, "0.3"])

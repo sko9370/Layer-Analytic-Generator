@@ -14,7 +14,7 @@ from pathlib import Path
 from lag import attack, layers, pipeline
 from lag import config as config_module
 from lag.errors import LagError
-from lag.models import CONFIDENCE_LEVELS, DEFAULT_LLM_MODEL, Config, ReportSource
+from lag.models import CONFIDENCE_LEVELS, LLM_PROVIDERS, Config, ReportSource
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +87,18 @@ def _build_command(args: argparse.Namespace) -> int:
         reports.extend({"source": source} for source in args.report)
         data["reports"] = reports
 
+    llm_overrides = {}
+    if args.provider:
+        llm_overrides["provider"] = args.provider
     if args.model:
+        llm_overrides["model"] = args.model
+    if args.effort:
+        llm_overrides["effort"] = args.effort
+    if args.base_url:
+        llm_overrides["base_url"] = args.base_url
+    if llm_overrides:
         llm_table = dict(data.get("llm", {}))
-        llm_table["model"] = args.model
+        llm_table.update(llm_overrides)
         data["llm"] = llm_table
 
     if args.output_dir:
@@ -142,9 +151,17 @@ def _extract_command(args: argparse.Namespace) -> int:
         stix_file=stix_file,
         cache_dir=cache_dir,
         offline=offline,
-        llm_model=args.model or llm_table.get("model", DEFAULT_LLM_MODEL),
-        llm_effort=args.effort or llm_table.get("effort", "high"),
+        llm_provider=args.provider or llm_table.get("provider", "anthropic"),
+        llm_model=args.model or llm_table.get("model", ""),
+        llm_effort=args.effort or llm_table.get("effort", ""),
+        llm_base_url=args.base_url or llm_table.get("base_url", ""),
+        llm_api_key_env=llm_table.get("api_key_env", ""),
+        llm_pdf_input=llm_table.get("pdf_input", "auto"),
     )
+
+    from lag import extract  # lazy: `lag extract` needs the anthropic/openai package only here
+
+    llm_settings = extract.resolve_llm_settings(config)
 
     def progress(msg: str) -> None:
         print(msg, file=sys.stderr)
@@ -172,8 +189,6 @@ def _extract_command(args: argparse.Namespace) -> int:
     )
 
     def _extract_step():
-        from lag import extract  # lazy: `lag extract` needs the anthropic package only here
-
         extraction, entries = extract.run_report(report, attack_data, config)
         return (
             (extraction, entries),
@@ -184,9 +199,8 @@ def _extract_command(args: argparse.Namespace) -> int:
         progress,
         2,
         total,
-        f"Extract techniques from report with {config.llm_model}",
-        "check ANTHROPIC_API_KEY (or `ant auth login`), the report URL/path, and that the "
-        'anthropic package is installed (pip install "layer-analytic-generator[llm]")',
+        f"Extract techniques from report with {llm_settings.provider}:{llm_settings.model}",
+        extract.llm_credentials_hint(llm_settings),
         _extract_step,
     )
 
@@ -200,10 +214,15 @@ def _extract_command(args: argparse.Namespace) -> int:
     layer_config = replace(config, name=label, sources={})
     layers.write_layer(layers.build_layer(entries, attack_data, layer_config), out_path)
 
-    _print_extraction_table(extraction, attack_data)
+    in_layer = {entry.technique_id for entry in entries}
+    _print_extraction_table(extraction, attack_data, in_layer)
     dropped_note = f": {', '.join(extraction.dropped)}" if extraction.dropped else ""
+    below = len(extraction.techniques) - len(entries)
     print()
-    print(f"Kept {len(entries)} technique(s); dropped {len(extraction.dropped)} unknown ID(s){dropped_note}")
+    print(
+        f"Kept {len(entries)} technique(s); {below} below min_confidence ({report.min_confidence}); "
+        f"dropped {len(extraction.dropped)} unknown ID(s){dropped_note}"
+    )
     print(f"Wrote layer: {out_path}")
     print(
         "Review the techniques above, then add the layer under [[custom_layers]] once you trust it, "
@@ -212,8 +231,8 @@ def _extract_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _print_extraction_table(extraction, attack_data) -> None:
-    header = ["Technique ID", "Confidence", "Technique", "Evidence"]
+def _print_extraction_table(extraction, attack_data, in_layer: set[str]) -> None:
+    header = ["Technique ID", "Confidence", "In layer", "Technique", "Evidence"]
     rows: list[list[str]] = []
     for technique in extraction.techniques:
         known = attack_data.techniques.get(technique.technique_id)
@@ -221,7 +240,8 @@ def _print_extraction_table(extraction, attack_data) -> None:
         evidence = technique.evidence
         if len(evidence) > 80:
             evidence = evidence[:77] + "..."
-        rows.append([technique.technique_id, technique.confidence, name, evidence])
+        included = "yes" if technique.technique_id in in_layer else "no"
+        rows.append([technique.technique_id, technique.confidence, included, name, evidence])
 
     widths = [len(h) for h in header]
     for row in rows:
@@ -266,7 +286,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "extracts (weight 1, medium confidence). Repeatable; adds to the config file's [[reports]].",
     )
     build_parser.add_argument(
+        "--provider",
+        default=None,
+        choices=list(LLM_PROVIDERS),
+        help="LLM provider used for report extraction (default: from config, else anthropic).",
+    )
+    build_parser.add_argument(
         "--model", default=None, help="Override the LLM model used for report extraction."
+    )
+    build_parser.add_argument(
+        "--effort",
+        default=None,
+        help="LLM effort (anthropic: low/medium/high/xhigh/max; openai: none/minimal/low/medium/"
+        "high/xhigh/max; default: provider default).",
+    )
+    build_parser.add_argument(
+        "--base-url",
+        default=None,
+        help="OpenAI-compatible endpoint (provider openai only), e.g. a local Ollama server.",
     )
     build_parser.add_argument("--offline", action="store_true", help="Never touch the network.")
     build_parser.add_argument("--stix-file", default=None, help="Local STIX bundle, skips download.")
@@ -291,10 +328,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--label", default=None, help="Label for the report (default: derived from its title)."
     )
     extract_parser.add_argument(
-        "--model", default=None, help="LLM model (default: from config, else claude-opus-5)."
+        "--provider",
+        default=None,
+        choices=list(LLM_PROVIDERS),
+        help="LLM provider (default: from config, else anthropic).",
     )
     extract_parser.add_argument(
-        "--effort", default=None, help="LLM effort: low, medium, high, xhigh, max (default: high)."
+        "--model",
+        default=None,
+        help="LLM model (default: from config, else claude-opus-5 for anthropic; required for openai).",
+    )
+    extract_parser.add_argument(
+        "--effort",
+        default=None,
+        help="LLM effort (anthropic: low/medium/high/xhigh/max; openai: none/minimal/low/medium/"
+        "high/xhigh/max; default: provider default).",
+    )
+    extract_parser.add_argument(
+        "--base-url",
+        default=None,
+        help="OpenAI-compatible endpoint (provider openai only), e.g. a local Ollama server.",
     )
     extract_parser.add_argument(
         "--min-confidence",

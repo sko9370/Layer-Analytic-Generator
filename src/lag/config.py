@@ -7,12 +7,22 @@ import tomllib
 from pathlib import Path
 
 from lag.errors import LagError
-from lag.models import CONFIDENCE_LEVELS, Config, CustomLayer, ReportSource
+from lag.models import CONFIDENCE_LEVELS, LLM_PROVIDERS, Config, CustomLayer, ReportSource
 
 SOURCE_ID_RE = re.compile(r"^[GSC]\d{4}$")
 GRADIENT_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
 URL_RE = re.compile(r"^https?://", re.IGNORECASE)
-LLM_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# Keep this message identical to lag.extract.OPENAI_MODEL_REQUIRED_MSG (config.py does not import
+# lag.extract, to keep config loading independent of the LLM extraction module).
+OPENAI_MODEL_REQUIRED_MSG = (
+    'llm.model is required for provider "openai" (the model name your OpenAI account or endpoint '
+    "serves, for example the one you would pass to the OpenAI API)"
+)
+LLM_EFFORT_LEVELS = {
+    "anthropic": ("low", "medium", "high", "xhigh", "max"),
+    "openai": ("none", "minimal", "low", "medium", "high", "xhigh", "max"),
+}
+LLM_PDF_INPUT_VALUES = ("auto", "native", "text")
 
 _TOP_LEVEL_KEYS = {
     "name",
@@ -40,7 +50,7 @@ _LAYER_KEYS = {"gradient"}
 _HTML_KEYS = {"enabled"}
 _CUSTOM_LAYER_KEYS = {"path", "label"}
 _REPORT_KEYS = {"source", "label", "weight", "min_confidence"}
-_LLM_KEYS = {"model", "effort"}
+_LLM_KEYS = {"provider", "model", "effort", "base_url", "api_key_env", "pdf_input"}
 
 _DEFAULTS = Config()
 
@@ -64,10 +74,26 @@ label = "Observed Activity"
 # min_confidence = "medium"    # low, medium, high
 
 [llm]                 # only used when [[reports]] entries are present
-model = "claude-opus-5"
-effort = "high"       # low, medium, high, xhigh, max
-# needs an API key: set ANTHROPIC_API_KEY, or run `ant auth login` once.
+provider = "anthropic"  # "anthropic" (Claude API) or "openai" (OpenAI or any OpenAI-compatible API)
+model = ""            # "" = claude-opus-5 for anthropic; provider "openai" has no default, required
+effort = ""           # "" = provider default ("high" for anthropic, omitted for openai)
+                      # anthropic: low, medium, high, xhigh, max
+                      # openai: none, minimal, low, medium, high, xhigh, max
+base_url = ""         # openai only: an OpenAI-compatible endpoint (Azure OpenAI, Ollama, vLLM, LM Studio)
+api_key_env = ""      # "" = SDK default (ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai)
+pdf_input = "auto"    # "auto", "native" (send the PDF itself), or "text" (extract text locally with pypdf)
+# needs an API key: set ANTHROPIC_API_KEY, or run `ant auth login` once (anthropic); set OPENAI_API_KEY
+# (or point api_key_env at another variable) for openai; a local server usually needs no key.
 # results are cached under attack.cache_dir, so rebuilds do not re-bill the API.
+
+# [llm]                # OpenAI example
+# provider = "openai"
+# model = "gpt-5.5"
+
+# [llm]                # local Ollama example (OpenAI-compatible server, no API key needed)
+# provider = "openai"
+# model = "llama3.1"
+# base_url = "http://localhost:11434/v1"
 
 [attack]
 version = ""         # "" = latest
@@ -250,12 +276,41 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
     if not isinstance(llm_table, dict):
         raise LagError("llm must be a table")
     _check_keys(llm_table, _LLM_KEYS, "llm")
+
+    llm_provider = llm_table.get("provider", _DEFAULTS.llm_provider)
+    if llm_provider not in LLM_PROVIDERS:
+        raise LagError(f"llm.provider must be one of {', '.join(LLM_PROVIDERS)}, got {llm_provider!r}")
+
     llm_model = llm_table.get("model", _DEFAULTS.llm_model)
-    if not isinstance(llm_model, str) or not llm_model:
-        raise LagError("llm.model must be a non-empty string")
+    if not isinstance(llm_model, str):
+        raise LagError("llm.model must be a string")
+
     llm_effort = llm_table.get("effort", _DEFAULTS.llm_effort)
-    if llm_effort not in LLM_EFFORT_LEVELS:
-        raise LagError(f"llm.effort must be one of {', '.join(LLM_EFFORT_LEVELS)}, got {llm_effort!r}")
+    allowed_efforts = LLM_EFFORT_LEVELS[llm_provider]
+    if not isinstance(llm_effort, str) or (llm_effort != "" and llm_effort not in allowed_efforts):
+        raise LagError(
+            f'llm.effort must be "" or one of {", ".join(allowed_efforts)} for provider '
+            f"{llm_provider!r}, got {llm_effort!r}"
+        )
+
+    llm_base_url = llm_table.get("base_url", _DEFAULTS.llm_base_url)
+    if not isinstance(llm_base_url, str):
+        raise LagError("llm.base_url must be a string")
+    if llm_base_url and llm_provider != "openai":
+        raise LagError(f'llm.base_url is only allowed with provider "openai" (got provider {llm_provider!r})')
+
+    llm_api_key_env = llm_table.get("api_key_env", _DEFAULTS.llm_api_key_env)
+    if not isinstance(llm_api_key_env, str):
+        raise LagError("llm.api_key_env must be a string")
+
+    llm_pdf_input = llm_table.get("pdf_input", _DEFAULTS.llm_pdf_input)
+    if llm_pdf_input not in LLM_PDF_INPUT_VALUES:
+        raise LagError(
+            f"llm.pdf_input must be one of {', '.join(LLM_PDF_INPUT_VALUES)}, got {llm_pdf_input!r}"
+        )
+
+    if reports and llm_provider == "openai" and not llm_model:
+        raise LagError(OPENAI_MODEL_REQUIRED_MSG)
 
     return Config(
         name=name,
@@ -264,8 +319,12 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
         sources=sources,
         custom_layers=custom_layers,
         reports=reports,
+        llm_provider=llm_provider,
         llm_model=llm_model,
         llm_effort=llm_effort,
+        llm_base_url=llm_base_url,
+        llm_api_key_env=llm_api_key_env,
+        llm_pdf_input=llm_pdf_input,
         attack_version=attack_version,
         stix_file=stix_file,
         cache_dir=cache_dir,

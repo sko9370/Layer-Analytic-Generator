@@ -176,7 +176,7 @@ def test_run_step_numbering_with_report(tmp_path: Path, mini_bundle_path: Path, 
 
     # load, reports, score, layer, analytics, plan = 6 steps.
     assert len(lines) == 12
-    assert lines[2] == "[2/6] Extract techniques from reports with claude-opus-5..."
+    assert lines[2] == "[2/6] Extract techniques from reports with anthropic:claude-opus-5..."
     assert "1 kept, 1 dropped" in lines[3]
     assert result.extractions == [("Report: Example", 1, ["T9999"])]
 
