@@ -124,6 +124,20 @@ class CustomLayer:
     label: str = "Observed Activity"
 
 
+CONFIDENCE_LEVELS = ("low", "medium", "high")
+DEFAULT_LLM_MODEL = "claude-opus-5"
+
+
+@dataclass
+class ReportSource:
+    """A threat report (URL or local file) whose techniques an LLM extracts for the plan."""
+
+    source: str  # http(s) URL or local file path (.pdf, .html, .htm, .txt, .md)
+    label: str = ""  # shown as the procedure source; "" means derive one from the source
+    weight: int = 1  # score added to every technique extracted from this report
+    min_confidence: str = "medium"  # drop techniques below this confidence ("low", "medium", "high")
+
+
 @dataclass
 class Config:
     name: str = "Analytic Plan"
@@ -132,6 +146,10 @@ class Config:
     # ATT&CK Group / Software / Campaign ID -> positive integer weight
     sources: dict[str, int] = field(default_factory=dict)
     custom_layers: list[CustomLayer] = field(default_factory=list)
+    reports: list[ReportSource] = field(default_factory=list)
+    # LLM report extraction (Anthropic API; key from ANTHROPIC_API_KEY or an `ant auth login` profile)
+    llm_model: str = DEFAULT_LLM_MODEL
+    llm_effort: str = "high"  # "low", "medium", "high", "xhigh", or "max"
     # ATT&CK data
     attack_version: str = ""  # "" means latest
     stix_file: Path | None = None  # local STIX bundle; skips download
