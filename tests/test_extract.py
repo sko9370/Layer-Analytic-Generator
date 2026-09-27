@@ -108,9 +108,9 @@ class FakeClient:
         self.beta = SimpleNamespace(messages=FakeMessages(message, error))
 
 
-def make_message(stop_reason="end_turn", stop_details=None, text=None):
+def make_message(stop_reason="end_turn", stop_details=None, text=None, usage=None):
     content = [SimpleNamespace(type="text", text=text)] if text is not None else []
-    return SimpleNamespace(stop_reason=stop_reason, stop_details=stop_details, content=content)
+    return SimpleNamespace(stop_reason=stop_reason, stop_details=stop_details, content=content, usage=usage)
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +136,10 @@ class FakeOpenAIClient:
         self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
 
 
-def make_openai_response(finish_reason="stop", content=None, refusal=None):
+def make_openai_response(finish_reason="stop", content=None, refusal=None, usage=None):
     message = SimpleNamespace(content=content, refusal=refusal)
     choice = SimpleNamespace(finish_reason=finish_reason, message=message)
-    return SimpleNamespace(choices=[choice])
+    return SimpleNamespace(choices=[choice], usage=usage)
 
 
 def make_openai_error_response(status_code: int, body: dict) -> httpx2.Response:
@@ -365,6 +365,7 @@ def test_extract_cache_hit_skips_client(tmp_path: Path, attack, caplog: pytest.L
     assert extraction.techniques == [
         ExtractedTechnique(technique_id="T1059", evidence="e", quote="q", confidence="high")
     ]
+    assert extraction.usage is None  # the cache file above predates the "usage" field
     assert any("cached" in r.message for r in caplog.records)
 
 
@@ -415,6 +416,41 @@ def test_extract_success_writes_cache(tmp_path: Path, attack) -> None:
 
     cache_path = _cache_path(document, _settings(), tmp_path)
     assert cache_path.is_file()
+
+
+def test_extract_captures_usage_from_message_and_persists_it(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="report.pdf", title="T", media_type="application/pdf", data=TINY_PDF, sha256="usage-ok"
+    )
+    message = make_message(text=valid_payload(), usage=SimpleNamespace(input_tokens=120, output_tokens=45))
+    client = FakeClient(message=message)
+    extraction = extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path, client=client)
+    assert extraction.usage == {"input_tokens": 120, "output_tokens": 45}
+
+    cache_path = _cache_path(document, _settings(), tmp_path)
+    cached_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached_payload["usage"] == {"input_tokens": 120, "output_tokens": 45}
+
+    # a fresh call re-reads the cached usage unchanged
+    reloaded = extract_techniques(
+        document, attack, settings=_settings(), cache_dir=tmp_path, client=ExplodingUsageClient()
+    )
+    assert reloaded.usage == {"input_tokens": 120, "output_tokens": 45}
+
+
+class ExplodingUsageClient:
+    def __getattr__(self, name):
+        raise AssertionError("client should not be used on a cache hit")
+
+
+def test_extract_no_usage_on_message_gives_none(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="report.pdf", title="T", media_type="application/pdf", data=TINY_PDF, sha256="usage-none"
+    )
+    message = make_message(text=valid_payload())  # usage defaults to None
+    client = FakeClient(message=message)
+    extraction = extract_techniques(document, attack, settings=_settings(), cache_dir=tmp_path, client=client)
+    assert extraction.usage is None
 
 
 def test_extract_refusal_raises(tmp_path: Path, attack) -> None:
@@ -771,6 +807,40 @@ def test_openai_happy_path_native_pdf(tmp_path: Path, attack) -> None:
 
     cache_path = _cache_path(document, settings, tmp_path)
     assert cache_path.is_file()
+
+
+def test_openai_captures_usage_from_response(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="oa-usage"
+    )
+    response = make_openai_response(
+        content=valid_payload(), usage=SimpleNamespace(prompt_tokens=200, completion_tokens=80)
+    )
+    client = FakeOpenAIClient(response=response)
+    settings = _settings(provider="openai", model="gpt-5.5")
+
+    extraction = extract_techniques(document, attack, settings=settings, cache_dir=tmp_path, client=client)
+    assert extraction.usage == {"input_tokens": 200, "output_tokens": 80}
+
+    cache_path = _cache_path(document, settings, tmp_path)
+    cached_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached_payload["usage"] == {"input_tokens": 200, "output_tokens": 80}
+
+
+def test_openai_no_usage_on_response_gives_none(tmp_path: Path, attack) -> None:
+    document = Document(
+        source="report.pdf", title="R", media_type="application/pdf", data=TINY_PDF, sha256="oa-usage-none"
+    )
+    response = make_openai_response(content=valid_payload())  # usage defaults to None
+    client = FakeOpenAIClient(response=response)
+    extraction = extract_techniques(
+        document,
+        attack,
+        settings=_settings(provider="openai", model="gpt-5.5"),
+        cache_dir=tmp_path,
+        client=client,
+    )
+    assert extraction.usage is None
 
 
 def test_openai_text_mode_sends_text_part(tmp_path: Path, attack) -> None:

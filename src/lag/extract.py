@@ -297,6 +297,9 @@ class Extraction:
     model: str
     techniques: list[ExtractedTechnique] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)  # IDs the model returned that are not in attack data
+    # token usage for the request that produced this extraction ({"input_tokens": int,
+    # "output_tokens": int}), or None for a cached extraction written before this field existed.
+    usage: dict | None = None
 
 
 def default_label(document: Document) -> str:
@@ -337,6 +340,7 @@ def _extraction_from_payload(
         model=payload.get("model", default_model),
         techniques=techniques,
         dropped=list(payload.get("dropped", [])),
+        usage=payload.get("usage"),  # None for a cache file written before this field existed
     )
 
 
@@ -372,6 +376,7 @@ def _write_cache(path: Path, extraction: Extraction) -> None:
             for t in extraction.techniques
         ],
         "dropped": extraction.dropped,
+        "usage": extraction.usage,
     }
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -499,8 +504,20 @@ def _anthropic_document_block(document: Document, pdf_input: str) -> dict:
     }
 
 
-def _request_anthropic(document: Document, attack: AttackData, settings: LlmSettings, client=None) -> str:
-    """Call the Anthropic API and return the raw JSON text of its response."""
+def _anthropic_usage(message) -> dict | None:
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return None
+    return {
+        "input_tokens": getattr(usage, "input_tokens", None),
+        "output_tokens": getattr(usage, "output_tokens", None),
+    }
+
+
+def _request_anthropic(
+    document: Document, attack: AttackData, settings: LlmSettings, client=None
+) -> tuple[str, dict | None]:
+    """Call the Anthropic API and return the raw JSON text of its response, and its token usage."""
     try:
         import anthropic
     except ImportError as exc:
@@ -567,7 +584,7 @@ def _request_anthropic(document: Document, attack: AttackData, settings: LlmSett
     text_block = next((b for b in message.content if getattr(b, "type", None) == "text"), None)
     if text_block is None:
         raise LagError(f"Claude returned no text content for report {document.source}")
-    return text_block.text
+    return text_block.text, _anthropic_usage(message)
 
 
 def _openai_document_part(document: Document, pdf_input: str) -> dict:
@@ -582,8 +599,21 @@ def _openai_document_part(document: Document, pdf_input: str) -> dict:
     return {"type": "text", "text": f'<document title="{document.title}">\n{text}\n</document>'}
 
 
-def _request_openai(document: Document, attack: AttackData, settings: LlmSettings, client=None) -> str:
-    """Call an OpenAI (or OpenAI-compatible) chat completions API and return the raw JSON text."""
+def _openai_usage(response) -> dict | None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    return {
+        "input_tokens": getattr(usage, "prompt_tokens", None),
+        "output_tokens": getattr(usage, "completion_tokens", None),
+    }
+
+
+def _request_openai(
+    document: Document, attack: AttackData, settings: LlmSettings, client=None
+) -> tuple[str, dict | None]:
+    """Call an OpenAI (or OpenAI-compatible) chat completions API and return the raw JSON text,
+    and its token usage."""
     try:
         import openai
     except ImportError as exc:
@@ -664,7 +694,7 @@ def _request_openai(document: Document, attack: AttackData, settings: LlmSetting
     content = choice.message.content
     if not content:
         raise LagError(f"the model returned no content for report {document.source}")
-    return content
+    return content, _openai_usage(response)
 
 
 def extract_techniques(
@@ -689,13 +719,14 @@ def extract_techniques(
         raise LagError(f"no cached extraction for {document.source} and offline mode is enabled")
 
     if settings.provider == "anthropic":
-        text = _request_anthropic(document, attack, settings, client)
+        text, usage = _request_anthropic(document, attack, settings, client)
     elif settings.provider == "openai":
-        text = _request_openai(document, attack, settings, client)
+        text, usage = _request_openai(document, attack, settings, client)
     else:
         raise LagError(f"unknown llm provider: {settings.provider!r}")
 
     extraction = _parse_response_text(text, document, settings.model, attack)
+    extraction.usage = usage
     _write_cache(cache_path, extraction)
     return extraction
 
