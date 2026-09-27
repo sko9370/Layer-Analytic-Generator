@@ -34,6 +34,7 @@ _ANALYTICS_KEYS = {
     "jpcert",
     "jpcert_tool_list_url",
     "network_data_components",
+    "network_min_share",
 }
 _LAYER_KEYS = {"gradient"}
 _HTML_KEYS = {"enabled"}
@@ -80,6 +81,9 @@ car_coverage_url = "https://raw.githubusercontent.com/mitre-attack/car/master/do
 jpcert = true
 jpcert_tool_list_url = "https://raw.githubusercontent.com/JPCERTCC/ToolAnalysisResultSheet/master/tool-list.html"
 network_data_components = ["Network Connection Creation", "Network Traffic Content", "Network Traffic Flow"]
+# a technique counts as "network" when at least this share (0 to 1) of its analytics' log sources
+# use one of the components above; lower it to put more techniques in the network list
+network_min_share = 0.3
 
 [layer]
 gradient = ["#8ec843ff", "#ffe766ff", "#ff6666ff"]
@@ -218,6 +222,15 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
     )
     if not isinstance(network_data_components, list):
         raise LagError("analytics.network_data_components must be a list")
+    network_min_share = analytics_table.get("network_min_share", _DEFAULTS.network_min_share)
+    if (
+        isinstance(network_min_share, bool)
+        or not isinstance(network_min_share, (int, float))
+        or not 0 < network_min_share <= 1
+    ):
+        raise LagError(
+            f"analytics.network_min_share must be a number above 0 and at most 1, got {network_min_share!r}"
+        )
 
     layer_table = data.get("layer", {})
     if not isinstance(layer_table, dict):
@@ -262,6 +275,7 @@ def config_from_dict(data: dict, base_dir: Path) -> Config:
         jpcert_enabled=jpcert_enabled,
         jpcert_tool_list_url=jpcert_tool_list_url,
         network_data_components=network_data_components,
+        network_min_share=float(network_min_share),
         layer_gradient=gradient,
         html_enabled=html_enabled,
     )

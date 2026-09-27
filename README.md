@@ -85,7 +85,7 @@ under every tactic it belongs to instead of just one.*
 - Get Analytic plan CSV from just a list of relevant MITRE ATT&CK Group, Software, and Campaign IDs, which are open-source groupings of Techniques and Procedures (specifically how a Technique was used by a group, tool, or campaign)
 	- Analytic plan CSV includes Technique description, relevant Procedures, and links to open-source analytics that detect the Technique to minimize window/tab switching for an analyst
 	- Analytics now come from ATT&CK's own detection strategies and analytics (`x-mitre-detection-strategy` / `x-mitre-analytic` / `x-mitre-data-component`), plus the MITRE CAR analytics repository and the JPCERT/CC Tool Analysis Result Sheet, matched by whole-word tool name
-	- The host vs. network split in the plan is now driven by the ATT&CK data components attached to a technique's analytics (configurable, see `network_data_components` below), instead of the free-text "data sources" field v1 used
+	- The host vs. network split in the plan is now driven by the ATT&CK data components attached to a technique's analytics (a technique is "network" when at least 30% of its analytics' log sources use a network data component; configurable, see `network_data_components` and `network_min_share` below), instead of the free-text "data sources" field v1 used
 	- Techniques will be ordered and prioritized based on the number of overlaps across Group, Software, and Campaign IDs as this indicates that an analyst will be more likely to observe it
 	- IDs can be weighted so that a Technique associated with a higher weighted ID will be prioritized higher than a Technique associated with a lower weighted ID, all else equal; this allows the inclusion of highly relevant and less relevant IDs without diluting the priority techniques
 - Extract ATT&CK techniques directly from a threat report (URL or PDF/HTML/text file) with an LLM (Claude), so a report you don't have a matching Group/Software/Campaign ID for still feeds the plan; see "Extracting techniques from threat reports (LLM)" below
@@ -185,6 +185,7 @@ car_coverage_url = "..."      # CAR coverage JSON (Navigator layer format)
 jpcert = true                  # include JPCERT/CC Tool Analysis Result Sheet matches
 jpcert_tool_list_url = "..."  # JPCERT tool list HTML
 network_data_components = ["Network Connection Creation", "Network Traffic Content", "Network Traffic Flow"]
+network_min_share = 0.3  # "network" when at least this share of a technique's log sources use those components
 # data component names that mark a technique as "network" rather than "host" in the plan
 
 [layer]

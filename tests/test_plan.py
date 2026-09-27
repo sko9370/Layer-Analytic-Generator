@@ -233,7 +233,7 @@ def test_data_components_unique_sorted_and_skips_empty():
     assert row.data_components == ["Network Traffic Flow", "Process Creation"]
 
 
-def test_category_network_when_any_data_component_matches():
+def test_category_network_when_network_share_meets_threshold():
     tactics = [make_tactic("command-and-control", "Command and Control")]
     an = make_analytic(log_sources=[make_log_source(data_component="Network Traffic Flow")])
     strat = make_strategy(analytics=[an])
@@ -253,6 +253,20 @@ def test_category_host_when_no_network_data_component():
     entry = make_entry("T1059", score=1)
     row = build_plan([entry], attack, make_config(), NO_SOURCES)[0]
     assert row.category == "host"
+
+
+def test_category_host_when_network_share_below_threshold():
+    tactics = [make_tactic("execution", "Execution")]
+    host = [make_log_source(data_component="Process Creation") for _ in range(8)]
+    net = [make_log_source(data_component="Network Traffic Flow")]
+    strat = make_strategy(analytics=[make_analytic(log_sources=host + net)])
+    technique = make_technique(tactics=["execution"], detection_strategies=[strat])
+    attack = make_attack([technique], tactics)
+    row = build_plan([make_entry("T1059", score=1)], attack, make_config(), NO_SOURCES)[0]
+    assert row.category == "host"
+    config = make_config()
+    config.network_min_share = 0.1
+    assert build_plan([make_entry("T1059", score=1)], attack, config, NO_SOURCES)[0].category == "network"
 
 
 def test_category_host_when_no_analytics_at_all():

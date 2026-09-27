@@ -322,3 +322,14 @@ def test_example_config_llm_table(tmp_path: Path) -> None:
     config = config_from_dict(data, tmp_path)
     assert config.llm_model == "claude-opus-5"
     assert config.llm_effort == "high"
+
+
+@pytest.mark.parametrize("value", [0, 1.5, -0.1, True, "0.3"])
+def test_network_min_share_rejects_bad_values(tmp_path, value):
+    with pytest.raises(LagError, match="network_min_share"):
+        config_from_dict({"sources": {"G0128": 1}, "analytics": {"network_min_share": value}}, tmp_path)
+
+
+def test_network_min_share_parses(tmp_path):
+    config = config_from_dict({"sources": {"G0128": 1}, "analytics": {"network_min_share": 0.5}}, tmp_path)
+    assert config.network_min_share == 0.5

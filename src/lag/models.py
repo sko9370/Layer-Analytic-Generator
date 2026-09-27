@@ -161,6 +161,8 @@ class Config:
     jpcert_enabled: bool = True
     jpcert_tool_list_url: str = DEFAULT_JPCERT_TOOL_LIST_URL
     network_data_components: list[str] = field(default_factory=lambda: list(DEFAULT_NETWORK_DATA_COMPONENTS))
+    # a technique is "network" when at least this share of its analytics' log sources use a network component
+    network_min_share: float = 0.3
     # navigator layer
     layer_gradient: list[str] = field(default_factory=lambda: list(DEFAULT_GRADIENT))
     # single-file HTML analytic plan

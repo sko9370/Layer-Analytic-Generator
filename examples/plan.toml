@@ -43,6 +43,7 @@ car_coverage_url = "https://raw.githubusercontent.com/mitre-attack/car/master/do
 jpcert = true
 jpcert_tool_list_url = "https://raw.githubusercontent.com/JPCERTCC/ToolAnalysisResultSheet/master/tool-list.html"
 network_data_components = ["Network Connection Creation", "Network Traffic Content", "Network Traffic Flow"]
+network_min_share = 0.3  # "network" when at least this share of a technique's log sources use those components
 
 [layer]
 gradient = ["#8ec843ff", "#ffe766ff", "#ff6666ff"]
