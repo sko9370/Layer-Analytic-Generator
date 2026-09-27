@@ -203,4 +203,4 @@ def test_example_config_round_trips(tmp_path: Path) -> None:
 
 
 def test_example_config_has_no_em_dash() -> None:
-    assert "—" not in EXAMPLE_CONFIG
+    assert "\u2014" not in EXAMPLE_CONFIG
