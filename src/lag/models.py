@@ -80,6 +80,9 @@ class AttackData:
     tactics: list[Tactic]  # matrix order
     sources: dict[str, str]  # ATT&CK ID -> name for every group, software, and campaign
     procedures: dict[str, list[Procedure]]  # source ATT&CK ID -> procedures of that source
+    # revoked technique ID -> the active technique that replaced it (e.g. T1562.001 -> T1685 in v19);
+    # lets older IDs from LLMs or pre-v19 custom layers map onto the current release
+    revoked_techniques: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

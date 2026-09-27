@@ -341,7 +341,7 @@ def test_extract_cache_hit_skips_client(tmp_path: Path, attack, caplog: pytest.L
                 "source": "report.pdf",
                 "title": "Cached Report",
                 "model": "claude-opus-5",
-                "techniques": [
+                "raw_techniques": [
                     {"technique_id": "T1059", "evidence": "e", "quote": "q", "confidence": "high"}
                 ],
                 "dropped": [],
@@ -635,7 +635,7 @@ def test_extract_cache_hit_drops_ids_missing_from_current_attack(tmp_path: Path,
             {
                 "title": "Old",
                 "model": "claude-opus-5",
-                "techniques": [
+                "raw_techniques": [
                     {"technique_id": "T1059", "evidence": "e", "quote": "q", "confidence": "high"},
                     {"technique_id": "T1066", "evidence": "e", "quote": "q", "confidence": "high"},
                 ],
@@ -1143,3 +1143,37 @@ def test_parse_response_text_rejects_non_object(attack) -> None:
     document = Document(source="r.txt", title="R", media_type="text/plain", data=b"x", sha256="f")
     with pytest.raises(LagError, match="not a JSON object"):
         _parse_response_text("[1, 2]", document, "m", attack)
+
+
+def test_revoked_ids_are_mapped_to_their_replacement(attack) -> None:
+    from lag.extract import _extraction_from_items
+
+    attack.revoked_techniques["T9001"] = "T1059"
+    items = [
+        {"technique_id": "t9001", "evidence": "old id", "quote": "q", "confidence": "medium"},
+        {"technique_id": "T1059", "evidence": "new id", "quote": "q", "confidence": "high"},
+        {"technique_id": "T0000", "evidence": "bogus", "quote": "q", "confidence": "high"},
+    ]
+    try:
+        extraction = _extraction_from_items(items, source="s", title="t", model="m", attack=attack)
+    finally:
+        del attack.revoked_techniques["T9001"]
+    assert [(t.technique_id, t.confidence) for t in extraction.techniques] == [("T1059", "high")]
+    assert extraction.remapped == [("T9001", "T1059")]
+    assert extraction.dropped == ["T0000"]
+    assert len(extraction.raw_items) == 3
+
+
+def test_cache_stores_raw_items_and_revalidates_on_load(tmp_path: Path, attack) -> None:
+    from lag.extract import _cache_payload, _extraction_from_items, _load_cached_extraction
+
+    document = Document(source="r", title="R", media_type="text/plain", data=b"x", sha256="raw")
+    items = [{"technique_id": "T9002", "evidence": "e", "quote": "q", "confidence": "high"}]
+    first = _extraction_from_items(items, source="r", title="R", model="m", attack=attack)
+    assert first.techniques == [] and first.dropped == ["T9002"]
+    attack.revoked_techniques["T9002"] = "T1059"  # a later ATT&CK load that knows the replacement
+    try:
+        reloaded = _load_cached_extraction(_cache_payload(first), document, "m", attack)
+    finally:
+        del attack.revoked_techniques["T9002"]
+    assert [t.technique_id for t in reloaded.techniques] == ["T1059"]

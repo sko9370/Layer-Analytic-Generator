@@ -350,3 +350,17 @@ def test_read_custom_layer_procedure_uses_label_as_source(tmp_path: Path) -> Non
     assert procedure.source_id == "Observed Activity"
     assert procedure.source_name == "Observed Activity"
     assert procedure.citations == []
+
+
+def test_read_custom_layer_maps_revoked_ids(tmp_path, caplog):
+    import json as _json
+
+    from lag.models import CustomLayer
+
+    attack = make_attack(techniques={"T1685": make_technique("T1685")})
+    attack.revoked_techniques["T9003"] = "T1685"
+    path = tmp_path / "old.json"
+    path.write_text(_json.dumps({"techniques": [{"techniqueID": "T9003", "score": 2, "comment": "old"}]}))
+    entries = read_custom_layer(CustomLayer(path=path, label="Old"), attack)
+    assert [e.technique_id for e in entries] == [attack.revoked_techniques["T9003"]]
+    assert "revoked" in caplog.text

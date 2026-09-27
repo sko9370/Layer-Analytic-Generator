@@ -38,7 +38,7 @@ from lag.models import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"  # also the cache format version: 2 caches the raw model answer
 MAX_PDF_BYTES = 32 * 1024 * 1024
 MIN_TEXT_CHARS = 200
 _DROP_TAGS = ("script", "style", "nav", "header", "footer", "form", "noscript", "svg")
@@ -300,6 +300,11 @@ class Extraction:
     # token usage for the request that produced this extraction ({"input_tokens": int,
     # "output_tokens": int}), or None for a cached extraction written before this field existed.
     usage: dict | None = None
+    # (revoked ID the model returned, current ID it was mapped to), e.g. ("T1562.001", "T1685")
+    remapped: list[tuple[str, str]] = field(default_factory=list)
+    # the model's technique items exactly as returned, cached so validation always runs against the
+    # ATT&CK release loaded at read time
+    raw_items: list[dict] = field(default_factory=list)
 
 
 def default_label(document: Document) -> str:
@@ -322,64 +327,91 @@ def _cache_path(document: Document, settings: LlmSettings, cache_dir: Path) -> P
     return Path(cache_dir) / "extractions" / f"{key}.json"
 
 
-def _extraction_from_payload(
-    payload: dict, source: str, default_title: str, default_model: str
+def _extraction_from_items(
+    items: list,
+    *,
+    source: str,
+    title: str,
+    model: str,
+    attack: AttackData,
+    usage: dict | None = None,
 ) -> Extraction:
-    techniques = [
-        ExtractedTechnique(
-            technique_id=t["technique_id"],
-            evidence=t["evidence"],
-            quote=t["quote"],
-            confidence=t["confidence"],
+    """Validate a model's technique items against the loaded ATT&CK data: uppercase IDs, map revoked
+    IDs to their replacements, drop unknown IDs, and dedupe keeping the highest confidence."""
+    order: list[str] = []
+    by_id: dict[str, ExtractedTechnique] = {}
+    dropped: list[str] = []
+    remapped: list[tuple[str, str]] = []
+    raw_items = [item for item in items if isinstance(item, dict)]
+    for item in raw_items:
+        technique_id = str(item.get("technique_id", "")).strip().upper()
+        if technique_id not in attack.techniques and technique_id in attack.revoked_techniques:
+            remapped.append((technique_id, attack.revoked_techniques[technique_id]))
+            technique_id = attack.revoked_techniques[technique_id]
+        if technique_id not in attack.techniques:
+            dropped.append(technique_id)
+            continue
+        candidate = ExtractedTechnique(
+            technique_id=technique_id,
+            evidence=item.get("evidence", ""),
+            quote=item.get("quote", ""),
+            confidence=item.get("confidence", "low"),
         )
-        for t in payload.get("techniques", [])
-    ]
+        existing = by_id.get(technique_id)
+        if existing is None:
+            order.append(technique_id)
+            by_id[technique_id] = candidate
+        elif _confidence_rank(candidate.confidence) > _confidence_rank(existing.confidence):
+            by_id[technique_id] = candidate
+
+    if remapped:
+        logger.info(
+            "report %s: mapped revoked technique ID(s) to their ATT&CK %s replacements: %s",
+            source,
+            attack.version,
+            ", ".join(f"{old} -> {new}" for old, new in remapped),
+        )
+    if dropped:
+        logger.warning("report %s: dropped unknown technique ID(s): %s", source, ", ".join(dropped))
+
     return Extraction(
         source=source,
-        title=payload.get("title", default_title),
-        model=payload.get("model", default_model),
-        techniques=techniques,
-        dropped=list(payload.get("dropped", [])),
-        usage=payload.get("usage"),  # None for a cache file written before this field existed
+        title=title,
+        model=model,
+        techniques=[by_id[tid] for tid in order],
+        dropped=dropped,
+        usage=usage,
+        remapped=remapped,
+        raw_items=raw_items,
     )
 
 
-def _drop_unknown(extraction: Extraction, attack: AttackData) -> Extraction:
-    """Remove techniques missing from the loaded ATT&CK data (a cached result may predate a release
-    that revoked or deprecated them)."""
-    unknown = [t.technique_id for t in extraction.techniques if t.technique_id not in attack.techniques]
-    if unknown:
-        logger.warning(
-            "report %s: cached technique ID(s) not in ATT&CK %s, dropped: %s",
-            extraction.source,
-            attack.version,
-            ", ".join(unknown),
-        )
-        extraction.techniques = [t for t in extraction.techniques if t.technique_id in attack.techniques]
-        extraction.dropped = extraction.dropped + unknown
-    return extraction
+def _load_cached_extraction(payload: dict, document: Document, model: str, attack: AttackData) -> Extraction:
+    """Rebuild an Extraction from a cache payload, validating the raw items against today's ATT&CK."""
+    return _extraction_from_items(
+        payload.get("raw_techniques", []),
+        source=document.source,
+        title=payload.get("title") or document.title,
+        model=payload.get("model") or model,
+        attack=attack,
+        usage=payload.get("usage"),
+    )
+
+
+def _cache_payload(extraction: Extraction) -> dict:
+    return {
+        "source": extraction.source,
+        "title": extraction.title,
+        "model": extraction.model,
+        "raw_techniques": extraction.raw_items,
+        "usage": extraction.usage,
+    }
 
 
 def _write_cache(path: Path, extraction: Extraction) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "source": extraction.source,
-        "title": extraction.title,
-        "model": extraction.model,
-        "techniques": [
-            {
-                "technique_id": t.technique_id,
-                "evidence": t.evidence,
-                "quote": t.quote,
-                "confidence": t.confidence,
-            }
-            for t in extraction.techniques
-        ],
-        "dropped": extraction.dropped,
-        "usage": extraction.usage,
-    }
     with path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+        json.dump(_cache_payload(extraction), f, indent=2, ensure_ascii=False)
 
 
 def _extract_pdf_text(document: Document) -> str:
@@ -420,8 +452,7 @@ def _confidence_rank(confidence: str) -> int:
 
 
 def _parse_response_text(text: str, document: Document, model: str, attack: AttackData) -> Extraction:
-    """Shared parsing for both providers: JSON load, uppercase IDs, unknown IDs to dropped,
-    dedupe keeping the highest-confidence entry per technique."""
+    """Shared parsing for both providers: JSON load, then _extraction_from_items validation."""
     # Some OpenAI-compatible servers wrap JSON in a markdown code fence despite the schema.
     fenced = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, flags=re.S)
     if fenced:
@@ -433,37 +464,12 @@ def _parse_response_text(text: str, document: Document, model: str, attack: Atta
     if not isinstance(payload, dict):
         raise LagError(f"the model's response for {document.source} was not a JSON object")
 
-    report_title = payload.get("report_title") or document.title
-    order: list[str] = []
-    by_id: dict[str, ExtractedTechnique] = {}
-    dropped: list[str] = []
-    for item in payload.get("techniques", []):
-        technique_id = str(item.get("technique_id", "")).upper()
-        if technique_id not in attack.techniques:
-            dropped.append(technique_id)
-            continue
-        candidate = ExtractedTechnique(
-            technique_id=technique_id,
-            evidence=item.get("evidence", ""),
-            quote=item.get("quote", ""),
-            confidence=item.get("confidence", "low"),
-        )
-        existing = by_id.get(technique_id)
-        if existing is None:
-            order.append(technique_id)
-            by_id[technique_id] = candidate
-        elif _confidence_rank(candidate.confidence) > _confidence_rank(existing.confidence):
-            by_id[technique_id] = candidate
-
-    if dropped:
-        logger.warning("report %s: dropped unknown technique ID(s): %s", document.source, ", ".join(dropped))
-
-    return Extraction(
+    return _extraction_from_items(
+        payload.get("techniques", []),
         source=document.source,
-        title=report_title,
+        title=payload.get("report_title") or document.title,
         model=model,
-        techniques=[by_id[tid] for tid in order],
-        dropped=dropped,
+        attack=attack,
     )
 
 
@@ -712,8 +718,7 @@ def extract_techniques(
         logger.info("using cached extraction")
         with cache_path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
-        cached = _extraction_from_payload(payload, document.source, document.title, settings.model)
-        return _drop_unknown(cached, attack)
+        return _load_cached_extraction(payload, document, settings.model, attack)
 
     if offline:
         raise LagError(f"no cached extraction for {document.source} and offline mode is enabled")

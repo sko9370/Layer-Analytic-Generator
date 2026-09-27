@@ -176,23 +176,7 @@ def _write_claude_code_cache(
     path: Path, extraction: extract.Extraction, total_cost_usd: float | None
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "source": extraction.source,
-        "title": extraction.title,
-        "model": extraction.model,
-        "techniques": [
-            {
-                "technique_id": t.technique_id,
-                "evidence": t.evidence,
-                "quote": t.quote,
-                "confidence": t.confidence,
-            }
-            for t in extraction.techniques
-        ],
-        "dropped": extraction.dropped,
-        "usage": extraction.usage,
-        "total_cost_usd": total_cost_usd,
-    }
+    payload = {**extract._cache_payload(extraction), "total_cost_usd": total_cost_usd}
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
@@ -213,8 +197,7 @@ def run_claude_code_backend(
     cache_path = _claude_code_cache_path(cache_dir, document, model, effort)
     if cache_path.is_file():
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        cached = extract._extraction_from_payload(payload, document.source, document.title, model)
-        cached = extract._drop_unknown(cached, attack_data)
+        cached = extract._load_cached_extraction(payload, document, model, attack_data)
         return ClaudeCodeResult(extraction=cached, total_cost_usd=payload.get("total_cost_usd"))
 
     if offline:
