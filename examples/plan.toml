@@ -17,6 +17,34 @@ S0596 = 1
 # path = "custom.json"
 # label = "Observed Activity"
 
+# Extract techniques from a threat report with an LLM (Claude, OpenAI, or an OpenAI-compatible API)
+# instead of, or in addition to, a Group/Software/Campaign ID. Uncomment and point "source" at a URL
+# or a local .pdf/.html/.htm/.txt/.md file (relative to this config file's directory); needs
+# `pip install "layer-analytic-generator[llm]"` and ANTHROPIC_API_KEY set (or `ant auth login`).
+# Results are cached, so rebuilds do not re-bill.
+# [[reports]]
+# source = "https://example.com/report.pdf"
+# label = ""                # "" = "Report: <title>"
+# weight = 1
+# min_confidence = "medium"  # low, medium, high
+
+[llm]                      # only used when [[reports]] entries are present
+provider = "anthropic"     # "anthropic" (Claude API) or "openai" (OpenAI or any OpenAI-compatible API)
+model = ""                 # "" = claude-opus-5 for anthropic; provider "openai" has no default, required
+effort = "high"            # anthropic: low, medium, high, xhigh, max; openai: none, minimal, low, medium, high, xhigh, max
+# base_url = ""             # openai only: an OpenAI-compatible endpoint
+# api_key_env = ""          # "" = SDK default (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+# pdf_input = "auto"        # "auto", "native" (send the PDF itself), or "text" (extract text locally with pypdf)
+
+# [llm]                      # OpenAI example
+# provider = "openai"
+# model = "gpt-5.5"
+
+# [llm]                      # local Ollama example (OpenAI-compatible server, no API key needed)
+# provider = "openai"
+# model = "llama3.1"
+# base_url = "http://localhost:11434/v1"
+
 [attack]
 version = ""             # "" = latest release; pin a specific one like "19.2" for reproducibility
 stix_file = ""             # "" = download; set to a local path to skip the network entirely
@@ -29,6 +57,7 @@ car_coverage_url = "https://raw.githubusercontent.com/mitre-attack/car/master/do
 jpcert = true
 jpcert_tool_list_url = "https://raw.githubusercontent.com/JPCERTCC/ToolAnalysisResultSheet/master/tool-list.html"
 network_data_components = ["Network Connection Creation", "Network Traffic Content", "Network Traffic Flow"]
+network_min_share = 0.3  # "network" when at least this share of a technique's log sources use those components
 
 [layer]
 gradient = ["#8ec843ff", "#ffe766ff", "#ff6666ff"]

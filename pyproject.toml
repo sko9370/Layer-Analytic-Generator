@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+anthropic = ["anthropic>=1.8"]
+openai = ["openai>=3.19", "pypdf>=6"]
+llm = ["anthropic>=1.8", "openai>=3.19", "pypdf>=6"]
+dev = ["pytest>=8", "ruff>=0.6", "anthropic>=1.8", "openai>=3.19", "pypdf>=6"]
 
 [project.scripts]
 lag = "lag.cli:main"

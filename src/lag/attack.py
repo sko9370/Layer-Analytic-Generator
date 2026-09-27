@@ -253,6 +253,31 @@ def _attach_detection_strategies(
         techniques[technique_id].detection_strategies = strategies
 
 
+def _revoked_technique_map(
+    objects: list[dict], by_id: dict[str, dict], techniques: dict[str, Technique]
+) -> dict[str, str]:
+    """Revoked technique ID -> the active technique that replaced it, following revoked-by chains."""
+    replaced_by: dict[str, str] = {}
+    for rel in objects:
+        if rel.get("type") != "relationship" or rel.get("relationship_type") != "revoked-by":
+            continue
+        source, target = by_id.get(rel.get("source_ref")), by_id.get(rel.get("target_ref"))
+        if source and target and source.get("type") == target.get("type") == "attack-pattern":
+            replaced_by[source["id"]] = target["id"]
+
+    result: dict[str, str] = {}
+    for stix_id in replaced_by:
+        old_id, _ = _attack_ref(by_id[stix_id])
+        current, seen = stix_id, set()
+        while current in replaced_by and current not in seen:
+            seen.add(current)
+            current = replaced_by[current]
+        new_id, _ = _attack_ref(by_id[current])
+        if old_id and new_id in techniques and old_id not in techniques:
+            result[old_id] = new_id
+    return result
+
+
 def _parse_sources(objects: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
     sources: dict[str, str] = {}
     stix_id_to_source_id: dict[str, str] = {}
@@ -322,4 +347,5 @@ def parse_bundle(bundle: dict, domain: str = "enterprise-attack") -> AttackData:
         tactics=tactics,
         sources=sources,
         procedures=procedures,
+        revoked_techniques=_revoked_technique_map(objects, by_id, techniques),
     )

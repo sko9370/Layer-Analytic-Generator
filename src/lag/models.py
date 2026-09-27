@@ -80,6 +80,9 @@ class AttackData:
     tactics: list[Tactic]  # matrix order
     sources: dict[str, str]  # ATT&CK ID -> name for every group, software, and campaign
     procedures: dict[str, list[Procedure]]  # source ATT&CK ID -> procedures of that source
+    # revoked technique ID -> the active technique that replaced it (e.g. T1562.001 -> T1685 in v19);
+    # lets older IDs from LLMs or pre-v19 custom layers map onto the current release
+    revoked_techniques: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +127,21 @@ class CustomLayer:
     label: str = "Observed Activity"
 
 
+CONFIDENCE_LEVELS = ("low", "medium", "high")
+LLM_PROVIDERS = ("anthropic", "openai")
+DEFAULT_LLM_MODEL = "claude-opus-5"  # default for provider "anthropic"; "openai" has no default model
+
+
+@dataclass
+class ReportSource:
+    """A threat report (URL or local file) whose techniques an LLM extracts for the plan."""
+
+    source: str  # http(s) URL or local file path (.pdf, .html, .htm, .txt, .md)
+    label: str = ""  # shown as the procedure source; "" means derive one from the source
+    weight: int = 1  # score added to every technique extracted from this report
+    min_confidence: str = "medium"  # drop techniques below this confidence ("low", "medium", "high")
+
+
 @dataclass
 class Config:
     name: str = "Analytic Plan"
@@ -132,6 +150,16 @@ class Config:
     # ATT&CK Group / Software / Campaign ID -> positive integer weight
     sources: dict[str, int] = field(default_factory=dict)
     custom_layers: list[CustomLayer] = field(default_factory=list)
+    reports: list[ReportSource] = field(default_factory=list)
+    # LLM report extraction
+    # "anthropic" (Claude API) or "openai" (OpenAI or any OpenAI-compatible API)
+    llm_provider: str = "anthropic"
+    llm_model: str = ""  # "" = provider default (DEFAULT_LLM_MODEL for anthropic; required for openai)
+    llm_effort: str = ""  # "" = provider default; anthropic: low..max, openai: reasoning_effort value
+    llm_base_url: str = ""  # openai only: OpenAI-compatible endpoint (Azure, Ollama, vLLM, LM Studio, ...)
+    # env var holding the API key; "" = SDK default (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+    llm_api_key_env: str = ""
+    llm_pdf_input: str = "auto"  # "native" (send the PDF), "text" (extract text locally), "auto"
     # ATT&CK data
     attack_version: str = ""  # "" means latest
     stix_file: Path | None = None  # local STIX bundle; skips download
@@ -143,6 +171,8 @@ class Config:
     jpcert_enabled: bool = True
     jpcert_tool_list_url: str = DEFAULT_JPCERT_TOOL_LIST_URL
     network_data_components: list[str] = field(default_factory=lambda: list(DEFAULT_NETWORK_DATA_COMPONENTS))
+    # a technique is "network" when at least this share of its analytics' log sources use a network component
+    network_min_share: float = 0.3
     # navigator layer
     layer_gradient: list[str] = field(default_factory=lambda: list(DEFAULT_GRADIENT))
     # single-file HTML analytic plan

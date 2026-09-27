@@ -170,6 +170,16 @@ def read_custom_layer(custom: CustomLayer, attack: AttackData) -> list[Technique
         technique_id = tech.get("techniqueID")
         if not technique_id:
             continue
+        if technique_id not in attack.techniques and technique_id in attack.revoked_techniques:
+            replacement = attack.revoked_techniques[technique_id]
+            logger.warning(
+                "custom layer %s: %s was revoked in ATT&CK %s; using its replacement %s",
+                path,
+                technique_id,
+                attack.version,
+                replacement,
+            )
+            technique_id = replacement
         if technique_id not in attack.techniques:
             logger.warning("custom layer %s: unknown technique ID %s, skipping", path, technique_id)
             continue

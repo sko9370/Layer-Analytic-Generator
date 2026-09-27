@@ -61,9 +61,7 @@ def build_plan(
         evidence_md = _evidence_md(entry.procedures)
         description_md = link_citations(technique.description, technique.citations)
         data_components = _data_components(technique)
-        category = (
-            "network" if any(dc in config.network_data_components for dc in data_components) else "host"
-        )
+        category = _category(technique, config)
         log_source_rows = _log_source_rows(technique)
         log_sources_md = _log_source_table(log_source_rows)
         combined_text = plain_text(evidence_md) + "\n" + plain_text(technique.description)
@@ -128,6 +126,22 @@ def _data_components(technique: Technique) -> list[str]:
                 if log_source.data_component:
                     names.add(log_source.data_component)
     return sorted(names)
+
+
+def _category(technique: Technique, config: Config) -> str:
+    """ "network" when at least config.network_min_share of the technique's log source references use a
+    network data component, else "host". One network analytic among many host ones stays "host"."""
+    components = [
+        log_source.data_component
+        for strategy in technique.detection_strategies
+        for analytic in strategy.analytics
+        for log_source in analytic.log_sources
+        if log_source.data_component
+    ]
+    if not components:
+        return "host"
+    network = sum(1 for component in components if component in config.network_data_components)
+    return "network" if network / len(components) >= config.network_min_share else "host"
 
 
 def _log_source_rows(technique: Technique) -> list[tuple[str, str, str]]:
@@ -202,6 +216,7 @@ def _references_md(technique: Technique, entry: TechniqueEntry) -> str:
 
 
 def _truncate(value: str) -> str:
+    value = value.replace("<code>", "`").replace("</code>", "`")  # ATT&CK inline code, readable in Excel
     if len(value) > MAX_CELL_LENGTH:
         return value[:MAX_CELL_LENGTH] + "\n\n[truncated]"
     return value

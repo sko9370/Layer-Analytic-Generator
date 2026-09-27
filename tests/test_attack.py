@@ -312,3 +312,37 @@ def test_live_load_attack_has_many_techniques(tmp_path: Path) -> None:
     config = Config(sources={}, cache_dir=tmp_path)
     result = load_attack(config)
     assert len(result.techniques) > 500
+
+
+def test_revoked_technique_map_follows_revoked_by_chains():
+    from lag.attack import parse_bundle
+
+    def pattern(stix_id, attack_id, **extra):
+        return {
+            "type": "attack-pattern",
+            "id": stix_id,
+            "name": attack_id,
+            "external_references": [{"source_name": "mitre-attack", "external_id": attack_id}],
+            **extra,
+        }
+
+    def revoked_by(src, dst):
+        return {
+            "type": "relationship",
+            "id": f"relationship--{src}-{dst}",
+            "relationship_type": "revoked-by",
+            "source_ref": src,
+            "target_ref": dst,
+        }
+
+    bundle = {
+        "objects": [
+            pattern("attack-pattern--a", "T1562.001", revoked=True),
+            pattern("attack-pattern--b", "T1600", revoked=True),
+            pattern("attack-pattern--c", "T1685"),
+            revoked_by("attack-pattern--a", "attack-pattern--b"),
+            revoked_by("attack-pattern--b", "attack-pattern--c"),
+        ]
+    }
+    attack = parse_bundle(bundle)
+    assert attack.revoked_techniques == {"T1562.001": "T1685", "T1600": "T1685"}
