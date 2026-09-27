@@ -145,7 +145,5 @@ class Config:
     network_data_components: list[str] = field(default_factory=lambda: list(DEFAULT_NETWORK_DATA_COMPONENTS))
     # navigator layer
     layer_gradient: list[str] = field(default_factory=lambda: list(DEFAULT_GRADIENT))
-    # static site
-    site_enabled: bool = True
-    site_mode: str = "local"  # "local" (open index.html from disk) or "hosted" (web server)
-    site_zip: bool = True
+    # single-file HTML analytic plan
+    html_enabled: bool = True
