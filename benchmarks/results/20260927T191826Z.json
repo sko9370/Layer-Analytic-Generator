@@ -1,0 +1,1442 @@
+{
+  "generated_at": "2026-09-27T19:18:26.496449+00:00",
+  "attack_version": "19.2",
+  "confidence_levels": [
+    "low",
+    "medium"
+  ],
+  "summaries": [
+    {
+      "model": "claude-opus-5",
+      "reports": 7,
+      "scores_by_confidence": {
+        "low": {
+          "macro_exact_recall": 0.6916725029256998,
+          "macro_parent_recall": 0.827820440429136,
+          "macro_precision": 0.5162497965761282,
+          "macro_f1": 0.5784634465193207
+        },
+        "medium": {
+          "macro_exact_recall": 0.6767756350876556,
+          "macro_parent_recall": 0.8111537737624693,
+          "macro_precision": 0.5301950677634568,
+          "macro_f1": 0.5821325211342809
+        }
+      },
+      "total_input_tokens": 108157,
+      "total_output_tokens": 46596,
+      "total_cost": 2.1918035000000002
+    },
+    {
+      "model": "claude-sonnet-5",
+      "reports": 7,
+      "scores_by_confidence": {
+        "low": {
+          "macro_exact_recall": 0.5441130906604053,
+          "macro_parent_recall": 0.6851972251351134,
+          "macro_precision": 0.5343287147634973,
+          "macro_f1": 0.5326823882616448
+        },
+        "medium": {
+          "macro_exact_recall": 0.5376195841668988,
+          "macro_parent_recall": 0.6780543679922563,
+          "macro_precision": 0.5447176018441138,
+          "macro_f1": 0.5361039812702216
+        }
+      },
+      "total_input_tokens": 134825,
+      "total_output_tokens": 81264,
+      "total_cost": 1.286643
+    }
+  ],
+  "reports": [
+    {
+      "url": "https://www.microsoft.com/en-us/security/blog/2025/07/22/disrupting-active-exploitation-of-on-premises-sharepoint-vulnerabilities/",
+      "title": "Disrupting active exploitation of on-premises SharePoint vulnerabilities | Microsoft Security Blog",
+      "source_name": "Microsoft SharePoint Exploit JUL 2025",
+      "ground_truth_technique_ids": [
+        "T1003.001",
+        "T1005",
+        "T1027.010",
+        "T1033",
+        "T1041",
+        "T1047",
+        "T1053.005",
+        "T1059.001",
+        "T1059.003",
+        "T1071.001",
+        "T1082",
+        "T1083",
+        "T1090",
+        "T1112",
+        "T1190",
+        "T1484.001",
+        "T1486",
+        "T1505.003",
+        "T1505.004",
+        "T1552.001",
+        "T1569.002",
+        "T1570",
+        "T1572",
+        "T1583.001",
+        "T1588.002",
+        "T1620",
+        "T1685"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 18682,
+            "output_tokens": 4539
+          },
+          "cost": 0.29248549999999995,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 27,
+              "predicted_count": 31,
+              "exact_recall": 0.8518518518518519,
+              "parent_recall": 0.84,
+              "precision": 0.7419354838709677,
+              "f1": 0.7931034482758621,
+              "missed": [
+                "T1027.010",
+                "T1083",
+                "T1583.001",
+                "T1588.002"
+              ],
+              "extra": [
+                "T1021.002",
+                "T1046",
+                "T1071.004",
+                "T1105",
+                "T1119",
+                "T1189",
+                "T1543.003",
+                "T1595.002"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 27,
+              "predicted_count": 30,
+              "exact_recall": 0.8518518518518519,
+              "parent_recall": 0.84,
+              "precision": 0.7666666666666667,
+              "f1": 0.8070175438596491,
+              "missed": [
+                "T1027.010",
+                "T1083",
+                "T1583.001",
+                "T1588.002"
+              ],
+              "extra": [
+                "T1021.002",
+                "T1046",
+                "T1071.004",
+                "T1105",
+                "T1119",
+                "T1543.003",
+                "T1595.002"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 18725,
+            "output_tokens": 5551
+          },
+          "cost": 0.130406,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 27,
+              "predicted_count": 23,
+              "exact_recall": 0.6666666666666666,
+              "parent_recall": 0.64,
+              "precision": 0.782608695652174,
+              "f1": 0.72,
+              "missed": [
+                "T1027.010",
+                "T1041",
+                "T1071.001",
+                "T1082",
+                "T1083",
+                "T1552.001",
+                "T1572",
+                "T1583.001",
+                "T1588.002"
+              ],
+              "extra": [
+                "T1018",
+                "T1105",
+                "T1119",
+                "T1543.003",
+                "T1595.002"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 27,
+              "predicted_count": 23,
+              "exact_recall": 0.6666666666666666,
+              "parent_recall": 0.64,
+              "precision": 0.782608695652174,
+              "f1": 0.72,
+              "missed": [
+                "T1027.010",
+                "T1041",
+                "T1071.001",
+                "T1082",
+                "T1083",
+                "T1552.001",
+                "T1572",
+                "T1583.001",
+                "T1588.002"
+              ],
+              "extra": [
+                "T1018",
+                "T1105",
+                "T1119",
+                "T1543.003",
+                "T1595.002"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://cloud.google.com/blog/topics/threat-intelligence/apt41-arisen-from-dust",
+      "title": "APT41 Has Arisen From the DUST | Google Cloud Blog",
+      "source_name": "Google Cloud APT41 2024",
+      "ground_truth_technique_ids": [
+        "T1005",
+        "T1010",
+        "T1012",
+        "T1016",
+        "T1018",
+        "T1027.009",
+        "T1027.013",
+        "T1036.004",
+        "T1036.005",
+        "T1041",
+        "T1055",
+        "T1055.002",
+        "T1056.001",
+        "T1057",
+        "T1059.003",
+        "T1070",
+        "T1070.004",
+        "T1070.005",
+        "T1071.001",
+        "T1074.001",
+        "T1082",
+        "T1083",
+        "T1087.001",
+        "T1087.002",
+        "T1102",
+        "T1105",
+        "T1113",
+        "T1119",
+        "T1124",
+        "T1135",
+        "T1140",
+        "T1213.006",
+        "T1482",
+        "T1497.001",
+        "T1505.003",
+        "T1518.001",
+        "T1543.003",
+        "T1553.002",
+        "T1560.001",
+        "T1567.002",
+        "T1569.002",
+        "T1573.002",
+        "T1574.001",
+        "T1583.007",
+        "T1586.003",
+        "T1588.003",
+        "T1593.002",
+        "T1594",
+        "T1596.005",
+        "T1615",
+        "T1654",
+        "T1685.005"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 15169,
+            "output_tokens": 6322
+          },
+          "cost": 0.3019305,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 52,
+              "predicted_count": 48,
+              "exact_recall": 0.6153846153846154,
+              "parent_recall": 0.6956521739130435,
+              "precision": 0.6666666666666666,
+              "f1": 0.64,
+              "missed": [
+                "T1010",
+                "T1018",
+                "T1036.004",
+                "T1041",
+                "T1055.002",
+                "T1070",
+                "T1070.005",
+                "T1119",
+                "T1124",
+                "T1140",
+                "T1213.006",
+                "T1482",
+                "T1497.001",
+                "T1573.002",
+                "T1583.007",
+                "T1586.003",
+                "T1596.005",
+                "T1615",
+                "T1654",
+                "T1685.005"
+              ],
+              "extra": [
+                "T1007",
+                "T1021.001",
+                "T1027.001",
+                "T1046",
+                "T1070.006",
+                "T1078",
+                "T1090.004",
+                "T1098",
+                "T1112",
+                "T1136.001",
+                "T1213",
+                "T1218.010",
+                "T1480.001",
+                "T1588.002",
+                "T1620",
+                "T1685"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 52,
+              "predicted_count": 47,
+              "exact_recall": 0.6153846153846154,
+              "parent_recall": 0.6956521739130435,
+              "precision": 0.6808510638297872,
+              "f1": 0.6464646464646465,
+              "missed": [
+                "T1010",
+                "T1018",
+                "T1036.004",
+                "T1041",
+                "T1055.002",
+                "T1070",
+                "T1070.005",
+                "T1119",
+                "T1124",
+                "T1140",
+                "T1213.006",
+                "T1482",
+                "T1497.001",
+                "T1573.002",
+                "T1583.007",
+                "T1586.003",
+                "T1596.005",
+                "T1615",
+                "T1654",
+                "T1685.005"
+              ],
+              "extra": [
+                "T1007",
+                "T1027.001",
+                "T1046",
+                "T1070.006",
+                "T1078",
+                "T1090.004",
+                "T1098",
+                "T1112",
+                "T1136.001",
+                "T1213",
+                "T1218.010",
+                "T1480.001",
+                "T1588.002",
+                "T1620",
+                "T1685"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 15210,
+            "output_tokens": 12253
+          },
+          "cost": 0.183366,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 52,
+              "predicted_count": 40,
+              "exact_recall": 0.5769230769230769,
+              "parent_recall": 0.6739130434782609,
+              "precision": 0.75,
+              "f1": 0.6521739130434783,
+              "missed": [
+                "T1005",
+                "T1027.009",
+                "T1036.004",
+                "T1041",
+                "T1055.002",
+                "T1070",
+                "T1070.005",
+                "T1102",
+                "T1119",
+                "T1124",
+                "T1140",
+                "T1213.006",
+                "T1482",
+                "T1497.001",
+                "T1573.002",
+                "T1583.007",
+                "T1586.003",
+                "T1588.003",
+                "T1596.005",
+                "T1615",
+                "T1654",
+                "T1685.005"
+              ],
+              "extra": [
+                "T1007",
+                "T1046",
+                "T1078.004",
+                "T1098",
+                "T1102.002",
+                "T1112",
+                "T1136.002",
+                "T1213",
+                "T1480.001",
+                "T1620"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 52,
+              "predicted_count": 40,
+              "exact_recall": 0.5769230769230769,
+              "parent_recall": 0.6739130434782609,
+              "precision": 0.75,
+              "f1": 0.6521739130434783,
+              "missed": [
+                "T1005",
+                "T1027.009",
+                "T1036.004",
+                "T1041",
+                "T1055.002",
+                "T1070",
+                "T1070.005",
+                "T1102",
+                "T1119",
+                "T1124",
+                "T1140",
+                "T1213.006",
+                "T1482",
+                "T1497.001",
+                "T1573.002",
+                "T1583.007",
+                "T1586.003",
+                "T1588.003",
+                "T1596.005",
+                "T1615",
+                "T1654",
+                "T1685.005"
+              ],
+              "extra": [
+                "T1007",
+                "T1046",
+                "T1078.004",
+                "T1098",
+                "T1102.002",
+                "T1112",
+                "T1136.002",
+                "T1213",
+                "T1480.001",
+                "T1620"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://cloud.google.com/blog/topics/threat-intelligence/china-nexus-espionage-targets-juniper-routers",
+      "title": "Ghost in the Router: China-Nexus Espionage Actor UNC3886 Targets Juniper Routers | Google Cloud Blog",
+      "source_name": "Mandiant UNC3886 Juniper Routers MAR 2025",
+      "ground_truth_technique_ids": [
+        "T1014",
+        "T1016",
+        "T1027.013",
+        "T1036.005",
+        "T1040",
+        "T1041",
+        "T1055",
+        "T1059.004",
+        "T1059.008",
+        "T1070.004",
+        "T1078",
+        "T1090",
+        "T1090.003",
+        "T1095",
+        "T1104",
+        "T1105",
+        "T1140",
+        "T1203",
+        "T1205",
+        "T1571",
+        "T1587.001",
+        "T1690"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 16824,
+            "output_tokens": 7397
+          },
+          "cost": 0.34535550000000004,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 22,
+              "predicted_count": 27,
+              "exact_recall": 0.6363636363636364,
+              "parent_recall": 0.75,
+              "precision": 0.5185185185185185,
+              "f1": 0.5714285714285714,
+              "missed": [
+                "T1041",
+                "T1055",
+                "T1090.003",
+                "T1104",
+                "T1203",
+                "T1205",
+                "T1587.001",
+                "T1690"
+              ],
+              "extra": [
+                "T1008",
+                "T1021.004",
+                "T1055.009",
+                "T1057",
+                "T1070.003",
+                "T1205.002",
+                "T1211",
+                "T1554",
+                "T1556",
+                "T1573.001",
+                "T1620",
+                "T1685",
+                "T1685.006"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 22,
+              "predicted_count": 25,
+              "exact_recall": 0.5909090909090909,
+              "parent_recall": 0.7,
+              "precision": 0.52,
+              "f1": 0.5531914893617021,
+              "missed": [
+                "T1016",
+                "T1041",
+                "T1055",
+                "T1090.003",
+                "T1104",
+                "T1203",
+                "T1205",
+                "T1587.001",
+                "T1690"
+              ],
+              "extra": [
+                "T1008",
+                "T1055.009",
+                "T1057",
+                "T1070.003",
+                "T1205.002",
+                "T1211",
+                "T1554",
+                "T1556",
+                "T1573.001",
+                "T1620",
+                "T1685",
+                "T1685.006"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 16869,
+            "output_tokens": 13846
+          },
+          "cost": 0.205932,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 22,
+              "predicted_count": 25,
+              "exact_recall": 0.45454545454545453,
+              "parent_recall": 0.65,
+              "precision": 0.4,
+              "f1": 0.425531914893617,
+              "missed": [
+                "T1027.013",
+                "T1040",
+                "T1041",
+                "T1055",
+                "T1059.008",
+                "T1090",
+                "T1104",
+                "T1203",
+                "T1205",
+                "T1571",
+                "T1587.001",
+                "T1690"
+              ],
+              "extra": [
+                "T1021.004",
+                "T1027.010",
+                "T1055.009",
+                "T1070.003",
+                "T1090.001",
+                "T1205.001",
+                "T1211",
+                "T1554",
+                "T1556.003",
+                "T1556.004",
+                "T1573.001",
+                "T1584.008",
+                "T1685",
+                "T1685.004",
+                "T1685.006"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 22,
+              "predicted_count": 22,
+              "exact_recall": 0.4090909090909091,
+              "parent_recall": 0.6,
+              "precision": 0.4090909090909091,
+              "f1": 0.4090909090909091,
+              "missed": [
+                "T1016",
+                "T1027.013",
+                "T1040",
+                "T1041",
+                "T1055",
+                "T1059.008",
+                "T1090",
+                "T1104",
+                "T1203",
+                "T1205",
+                "T1571",
+                "T1587.001",
+                "T1690"
+              ],
+              "extra": [
+                "T1027.010",
+                "T1055.009",
+                "T1070.003",
+                "T1090.001",
+                "T1205.001",
+                "T1211",
+                "T1554",
+                "T1556.003",
+                "T1556.004",
+                "T1573.001",
+                "T1685",
+                "T1685.004",
+                "T1685.006"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://www.microsoft.com/security/blog/2021/01/20/deep-dive-into-the-solorigate-second-stage-activation-from-sunburst-to-teardrop-and-raindrop/",
+      "title": "Deep dive into the Solorigate second-stage activation: From SUNBURST to TEARDROP and Raindrop | Microsoft Security Blog",
+      "source_name": "Microsoft Deep Dive Solorigate January 2021",
+      "ground_truth_technique_ids": [
+        "T1003.006",
+        "T1012",
+        "T1018",
+        "T1027",
+        "T1027.002",
+        "T1027.013",
+        "T1036",
+        "T1036.005",
+        "T1047",
+        "T1057",
+        "T1059.005",
+        "T1070",
+        "T1070.006",
+        "T1070.007",
+        "T1070.009",
+        "T1112",
+        "T1140",
+        "T1195.002",
+        "T1218.011",
+        "T1482",
+        "T1546.003",
+        "T1546.012",
+        "T1555",
+        "T1558.003",
+        "T1560.001",
+        "T1587.001",
+        "T1680",
+        "T1685",
+        "T1685.001",
+        "T1686"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 18989,
+            "output_tokens": 8181
+          },
+          "cost": 0.38660550000000005,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 30,
+              "predicted_count": 43,
+              "exact_recall": 0.7333333333333333,
+              "parent_recall": 0.9090909090909091,
+              "precision": 0.5116279069767442,
+              "f1": 0.6027397260273972,
+              "missed": [
+                "T1027",
+                "T1027.002",
+                "T1027.013",
+                "T1036",
+                "T1070",
+                "T1070.007",
+                "T1587.001",
+                "T1680"
+              ],
+              "extra": [
+                "T1007",
+                "T1027.009",
+                "T1033",
+                "T1036.008",
+                "T1055",
+                "T1059.001",
+                "T1059.003",
+                "T1070.004",
+                "T1071.001",
+                "T1071.004",
+                "T1074.002",
+                "T1078.002",
+                "T1082",
+                "T1087.002",
+                "T1480",
+                "T1497.003",
+                "T1543.003",
+                "T1567.002",
+                "T1568.002",
+                "T1570",
+                "T1620"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 30,
+              "predicted_count": 42,
+              "exact_recall": 0.7333333333333333,
+              "parent_recall": 0.9090909090909091,
+              "precision": 0.5238095238095238,
+              "f1": 0.6111111111111112,
+              "missed": [
+                "T1027",
+                "T1027.002",
+                "T1027.013",
+                "T1036",
+                "T1070",
+                "T1070.007",
+                "T1587.001",
+                "T1680"
+              ],
+              "extra": [
+                "T1007",
+                "T1027.009",
+                "T1033",
+                "T1036.008",
+                "T1055",
+                "T1059.001",
+                "T1059.003",
+                "T1070.004",
+                "T1071.001",
+                "T1071.004",
+                "T1074.002",
+                "T1078.002",
+                "T1082",
+                "T1087.002",
+                "T1497.003",
+                "T1543.003",
+                "T1567.002",
+                "T1568.002",
+                "T1570",
+                "T1620"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 19036,
+            "output_tokens": 12519
+          },
+          "cost": 0.20133,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 30,
+              "predicted_count": 35,
+              "exact_recall": 0.6666666666666666,
+              "parent_recall": 0.8181818181818182,
+              "precision": 0.5714285714285714,
+              "f1": 0.6153846153846154,
+              "missed": [
+                "T1012",
+                "T1027.002",
+                "T1027.013",
+                "T1036",
+                "T1070",
+                "T1070.007",
+                "T1070.009",
+                "T1112",
+                "T1587.001",
+                "T1680"
+              ],
+              "extra": [
+                "T1007",
+                "T1033",
+                "T1055",
+                "T1059.001",
+                "T1059.003",
+                "T1069.002",
+                "T1071.001",
+                "T1071.004",
+                "T1078",
+                "T1082",
+                "T1087.002",
+                "T1518.001",
+                "T1567.002",
+                "T1568.002",
+                "T1620"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 30,
+              "predicted_count": 35,
+              "exact_recall": 0.6666666666666666,
+              "parent_recall": 0.8181818181818182,
+              "precision": 0.5714285714285714,
+              "f1": 0.6153846153846154,
+              "missed": [
+                "T1012",
+                "T1027.002",
+                "T1027.013",
+                "T1036",
+                "T1070",
+                "T1070.007",
+                "T1070.009",
+                "T1112",
+                "T1587.001",
+                "T1680"
+              ],
+              "extra": [
+                "T1007",
+                "T1033",
+                "T1055",
+                "T1059.001",
+                "T1059.003",
+                "T1069.002",
+                "T1071.001",
+                "T1071.004",
+                "T1078",
+                "T1082",
+                "T1087.002",
+                "T1518.001",
+                "T1567.002",
+                "T1568.002",
+                "T1620"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/security/blog/2022/09/08/microsoft-investigates-iranian-attacks-against-the-albanian-government/",
+      "title": "Microsoft investigates Iranian attacks against the Albanian government | Microsoft Security Blog",
+      "source_name": "Microsoft Albanian Government Attacks September 2022",
+      "ground_truth_technique_ids": [
+        "T1021.001",
+        "T1021.002",
+        "T1027.013",
+        "T1046",
+        "T1047",
+        "T1059.001",
+        "T1059.003",
+        "T1070.004",
+        "T1078.001",
+        "T1083",
+        "T1098.002",
+        "T1105",
+        "T1134.001",
+        "T1480",
+        "T1486",
+        "T1491.001",
+        "T1505.003",
+        "T1547.001",
+        "T1561.002",
+        "T1588.002",
+        "T1680",
+        "T1685",
+        "T1685.001"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 17126,
+            "output_tokens": 7086
+          },
+          "cost": 0.34060050000000003,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 23,
+              "predicted_count": 35,
+              "exact_recall": 0.6086956521739131,
+              "parent_recall": 0.8,
+              "precision": 0.4,
+              "f1": 0.4827586206896552,
+              "missed": [
+                "T1027.013",
+                "T1078.001",
+                "T1105",
+                "T1480",
+                "T1491.001",
+                "T1561.002",
+                "T1588.002",
+                "T1680",
+                "T1685.001"
+              ],
+              "extra": [
+                "T1003.001",
+                "T1003.003",
+                "T1027",
+                "T1036.005",
+                "T1078",
+                "T1087.002",
+                "T1112",
+                "T1114.002",
+                "T1134.002",
+                "T1136.002",
+                "T1190",
+                "T1485",
+                "T1543.003",
+                "T1553.002",
+                "T1561.001",
+                "T1570",
+                "T1585.001",
+                "T1587.001",
+                "T1588.003",
+                "T1591",
+                "T1685.005"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 23,
+              "predicted_count": 33,
+              "exact_recall": 0.6086956521739131,
+              "parent_recall": 0.8,
+              "precision": 0.42424242424242425,
+              "f1": 0.5,
+              "missed": [
+                "T1027.013",
+                "T1078.001",
+                "T1105",
+                "T1480",
+                "T1491.001",
+                "T1561.002",
+                "T1588.002",
+                "T1680",
+                "T1685.001"
+              ],
+              "extra": [
+                "T1003.001",
+                "T1027",
+                "T1036.005",
+                "T1078",
+                "T1087.002",
+                "T1112",
+                "T1114.002",
+                "T1134.002",
+                "T1136.002",
+                "T1190",
+                "T1485",
+                "T1543.003",
+                "T1553.002",
+                "T1561.001",
+                "T1570",
+                "T1585.001",
+                "T1587.001",
+                "T1588.003",
+                "T1685.005"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 43532,
+            "output_tokens": 12762
+          },
+          "cost": 0.236475,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 23,
+              "predicted_count": 28,
+              "exact_recall": 0.6086956521739131,
+              "parent_recall": 0.7,
+              "precision": 0.5,
+              "f1": 0.5490196078431373,
+              "missed": [
+                "T1027.013",
+                "T1047",
+                "T1078.001",
+                "T1105",
+                "T1480",
+                "T1491.001",
+                "T1588.002",
+                "T1680",
+                "T1685.001"
+              ],
+              "extra": [
+                "T1003.001",
+                "T1006",
+                "T1018",
+                "T1027",
+                "T1078.003",
+                "T1087.002",
+                "T1114.002",
+                "T1134.002",
+                "T1136.002",
+                "T1190",
+                "T1485",
+                "T1553.002",
+                "T1570",
+                "T1685.005"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 23,
+              "predicted_count": 27,
+              "exact_recall": 0.6086956521739131,
+              "parent_recall": 0.7,
+              "precision": 0.5185185185185185,
+              "f1": 0.56,
+              "missed": [
+                "T1027.013",
+                "T1047",
+                "T1078.001",
+                "T1105",
+                "T1480",
+                "T1491.001",
+                "T1588.002",
+                "T1680",
+                "T1685.001"
+              ],
+              "extra": [
+                "T1003.001",
+                "T1006",
+                "T1027",
+                "T1078.003",
+                "T1087.002",
+                "T1114.002",
+                "T1134.002",
+                "T1136.002",
+                "T1190",
+                "T1485",
+                "T1553.002",
+                "T1570",
+                "T1685.005"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://cloud.google.com/blog/topics/threat-intelligence/voice-phishing-data-extortion",
+      "title": "The Cost of a Call: From Voice Phishing to Data Extortion | Google Cloud Blog",
+      "source_name": "Google Salesforce JUN 2025",
+      "ground_truth_technique_ids": [
+        "T1036",
+        "T1059.006",
+        "T1078.002",
+        "T1090",
+        "T1090.003",
+        "T1213.004",
+        "T1567",
+        "T1585",
+        "T1585.002",
+        "T1586.002",
+        "T1587.001",
+        "T1588.002",
+        "T1598.004",
+        "T1608.005",
+        "T1657",
+        "T1671",
+        "T1684.001"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 6709,
+            "output_tokens": 4367
+          },
+          "cost": 0.16845549999999998,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 17,
+              "predicted_count": 20,
+              "exact_recall": 0.5294117647058824,
+              "parent_recall": 0.8,
+              "precision": 0.45,
+              "f1": 0.4864864864864865,
+              "missed": [
+                "T1036",
+                "T1059.006",
+                "T1078.002",
+                "T1090",
+                "T1585",
+                "T1586.002",
+                "T1608.005",
+                "T1671"
+              ],
+              "extra": [
+                "T1030",
+                "T1036.005",
+                "T1078.004",
+                "T1111",
+                "T1119",
+                "T1528",
+                "T1550.001",
+                "T1566.004",
+                "T1583.004",
+                "T1585.003",
+                "T1586.003"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 17,
+              "predicted_count": 18,
+              "exact_recall": 0.47058823529411764,
+              "parent_recall": 0.7333333333333333,
+              "precision": 0.4444444444444444,
+              "f1": 0.45714285714285713,
+              "missed": [
+                "T1036",
+                "T1059.006",
+                "T1078.002",
+                "T1090",
+                "T1567",
+                "T1585",
+                "T1586.002",
+                "T1608.005",
+                "T1671"
+              ],
+              "extra": [
+                "T1030",
+                "T1036.005",
+                "T1078.004",
+                "T1111",
+                "T1119",
+                "T1528",
+                "T1550.001",
+                "T1566.004",
+                "T1585.003",
+                "T1586.003"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 6756,
+            "output_tokens": 8937
+          },
+          "cost": 0.11639000000000001,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 17,
+              "predicted_count": 13,
+              "exact_recall": 0.23529411764705882,
+              "parent_recall": 0.6,
+              "precision": 0.3076923076923077,
+              "f1": 0.26666666666666666,
+              "missed": [
+                "T1036",
+                "T1059.006",
+                "T1078.002",
+                "T1090",
+                "T1213.004",
+                "T1567",
+                "T1585",
+                "T1585.002",
+                "T1586.002",
+                "T1588.002",
+                "T1598.004",
+                "T1608.005",
+                "T1671"
+              ],
+              "extra": [
+                "T1020",
+                "T1036.005",
+                "T1056.003",
+                "T1078.004",
+                "T1213",
+                "T1528",
+                "T1566.004",
+                "T1585.003",
+                "T1586.003"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 17,
+              "predicted_count": 13,
+              "exact_recall": 0.23529411764705882,
+              "parent_recall": 0.6,
+              "precision": 0.3076923076923077,
+              "f1": 0.26666666666666666,
+              "missed": [
+                "T1036",
+                "T1059.006",
+                "T1078.002",
+                "T1090",
+                "T1213.004",
+                "T1567",
+                "T1585",
+                "T1585.002",
+                "T1586.002",
+                "T1588.002",
+                "T1598.004",
+                "T1608.005",
+                "T1671"
+              ],
+              "extra": [
+                "T1020",
+                "T1036.005",
+                "T1056.003",
+                "T1078.004",
+                "T1213",
+                "T1528",
+                "T1566.004",
+                "T1585.003",
+                "T1586.003"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "url": "https://cloud.google.com/blog/topics/threat-intelligence/3cx-software-supply-chain-compromise/",
+      "title": "3CX Software Supply Chain Compromise Initiated by a Prior Software Supply Chain Compromise; Suspected North Korean Actor Responsible | Mandiant | Google Cloud Blog",
+      "source_name": "Mandiant 3cx UNC4736 2023",
+      "ground_truth_technique_ids": [
+        "T1027",
+        "T1055",
+        "T1055.002",
+        "T1071.001",
+        "T1102.001",
+        "T1189",
+        "T1195.002",
+        "T1203",
+        "T1217",
+        "T1543.004",
+        "T1553.002",
+        "T1559",
+        "T1573.001",
+        "T1574.001",
+        "T1620"
+      ],
+      "models": {
+        "claude-opus-5": {
+          "usage": {
+            "input_tokens": 14658,
+            "output_tokens": 8704
+          },
+          "cost": 0.35637050000000003,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 15,
+              "predicted_count": 40,
+              "exact_recall": 0.8666666666666667,
+              "parent_recall": 1.0,
+              "precision": 0.325,
+              "f1": 0.4727272727272727,
+              "missed": [
+                "T1027",
+                "T1055.002"
+              ],
+              "extra": [
+                "T1003",
+                "T1005",
+                "T1012",
+                "T1021",
+                "T1027.003",
+                "T1027.013",
+                "T1036.001",
+                "T1036.005",
+                "T1057",
+                "T1059.004",
+                "T1070.004",
+                "T1071.004",
+                "T1082",
+                "T1083",
+                "T1090",
+                "T1105",
+                "T1112",
+                "T1134",
+                "T1140",
+                "T1190",
+                "T1497.001",
+                "T1547.001",
+                "T1565.001",
+                "T1588.004",
+                "T1614.001",
+                "T1622",
+                "T1685.005"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 15,
+              "predicted_count": 37,
+              "exact_recall": 0.8666666666666667,
+              "parent_recall": 1.0,
+              "precision": 0.35135135135135137,
+              "f1": 0.5,
+              "missed": [
+                "T1027",
+                "T1055.002"
+              ],
+              "extra": [
+                "T1003",
+                "T1005",
+                "T1012",
+                "T1021",
+                "T1027.003",
+                "T1027.013",
+                "T1036.001",
+                "T1036.005",
+                "T1057",
+                "T1059.004",
+                "T1070.004",
+                "T1071.004",
+                "T1082",
+                "T1083",
+                "T1090",
+                "T1105",
+                "T1112",
+                "T1140",
+                "T1497.001",
+                "T1565.001",
+                "T1588.004",
+                "T1614.001",
+                "T1622",
+                "T1685.005"
+              ]
+            }
+          }
+        },
+        "claude-sonnet-5": {
+          "usage": {
+            "input_tokens": 14697,
+            "output_tokens": 15396
+          },
+          "cost": 0.212744,
+          "dropped": [],
+          "metrics_by_confidence": {
+            "low": {
+              "ground_truth_count": 15,
+              "predicted_count": 21,
+              "exact_recall": 0.6,
+              "parent_recall": 0.7142857142857143,
+              "precision": 0.42857142857142855,
+              "f1": 0.5,
+              "missed": [
+                "T1055.002",
+                "T1102.001",
+                "T1189",
+                "T1203",
+                "T1217",
+                "T1559"
+              ],
+              "extra": [
+                "T1003",
+                "T1005",
+                "T1036",
+                "T1070.004",
+                "T1082",
+                "T1090.001",
+                "T1102.003",
+                "T1105",
+                "T1140",
+                "T1190",
+                "T1572",
+                "T1588.004"
+              ]
+            },
+            "medium": {
+              "ground_truth_count": 15,
+              "predicted_count": 19,
+              "exact_recall": 0.6,
+              "parent_recall": 0.7142857142857143,
+              "precision": 0.47368421052631576,
+              "f1": 0.5294117647058824,
+              "missed": [
+                "T1055.002",
+                "T1102.001",
+                "T1189",
+                "T1203",
+                "T1217",
+                "T1559"
+              ],
+              "extra": [
+                "T1005",
+                "T1036",
+                "T1070.004",
+                "T1090.001",
+                "T1102.003",
+                "T1105",
+                "T1140",
+                "T1190",
+                "T1572",
+                "T1588.004"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "backend": "claude-code"
+}

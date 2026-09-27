@@ -258,16 +258,28 @@ LM Studio) usually needs no key at all.
 ### Choosing a model
 
 Extraction is structured extraction plus ATT&CK mapping judgment: picking the right technique, and
-the right sub-technique, from a report's prose. Claude Sonnet 5 (`claude-sonnet-5`) handles this
-well and costs 2.5x less per token than Opus 5 ($2/$10 vs $5/$25 per million input/output tokens at the time of writing; check current pricing);
-a typical 20-40 page report runs roughly 20K to 60K input tokens, so either model costs cents to
-tens of cents per report, and results are cached. Opus 5 is the default because it gives the best
-mapping judgment on long or dense reports (for example picking the right sub-technique); set
-`model = "claude-sonnet-5"` to cut cost. Every returned technique ID is validated against the
-loaded ATT&CK data either way, so a weaker model mostly risks missed or less specific techniques,
-not invalid ones; review the table before briefing. Local models via OpenAI-compatible servers work
-if they support JSON-schema structured output; smaller models may miss more techniques, so compare
-their output against a Claude run on a report you know before relying on them.
+the right sub-technique, from a report's prose. A small benchmark (`benchmarks/`, 7 public threat
+reports scored against the techniques ATT&CK itself maps from each report; results in
+`benchmarks/results/20260927T191826Z.md`) measured:
+
+| Model | Exact recall | Parent-level recall | Agreement with ATT&CK | F1 | API list cost per report |
+| --- | --- | --- | --- | --- | --- |
+| `claude-opus-5` (default) | 69% | 83% | 52% | 58% | about $0.31 |
+| `claude-sonnet-5` | 54% | 69% | 53% | 53% | about $0.18 |
+
+Both models are about equally precise; Opus finds noticeably more of the techniques ATT&CK's
+analysts mapped (higher recall on 6 of 7 reports, tied on the seventh), which matters for a hunt
+plan whose job is coverage. Sonnet's F1 is higher on 4 of 7 reports because it proposes fewer
+extra techniques, so per-report results are mixed even though Opus leads on average.
+Opus stays the default; `model = "claude-sonnet-5"` is a reasonable choice for large batches or a
+first pass when cost matters more than completeness. ATT&CK's mappings are not exhaustive, so
+"extra" techniques are often legitimate, and 7 reports with one run per model is indicative, not
+definitive: rerun `python benchmarks/model_benchmark.py` on reports from your own domain before
+standardizing on a model. Every returned technique ID is validated against the loaded ATT&CK data
+(revoked IDs are mapped to their replacements), so a weaker model mostly risks missed or less
+specific techniques, not invalid ones. Local models via OpenAI-compatible servers work if they
+support JSON-schema structured output; benchmark them the same way (`--models openai:<model>
+--base-url ...`) before relying on them.
 
 ### PDF input: native vs text
 
